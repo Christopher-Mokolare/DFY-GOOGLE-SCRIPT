@@ -70,11 +70,11 @@ const ContentModeration = {
     if (!original) return {allowed:true, field:fieldName || '', category:'', match:''};
 
     const normalized = this.normalize_(original);
-    const compact = normalized.replace(/\\s+/g, '');
+    const compact = normalized.replace(/\s+/g, '');
 
     for (let i=0; i<this.blockedPhrases_.length; i++) {
       const phrase = this.normalize_(this.blockedPhrases_[i]);
-      if (normalized.indexOf(phrase) >= 0 || compact.indexOf(phrase.replace(/\\s+/g, '')) >= 0) {
+      if (normalized.indexOf(phrase) >= 0 || compact.indexOf(phrase.replace(/\s+/g, '')) >= 0) {
         return {allowed:false, field:fieldName || '', category:'explicit', match:this.blockedPhrases_[i]};
       }
     }
