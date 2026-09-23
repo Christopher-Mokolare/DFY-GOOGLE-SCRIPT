@@ -26,6 +26,7 @@ const Payments = {
   manualDetails_: function(task,user){
     if(!task)return fail_('Task not found');
     if(String(task.createdByUserId)!==String(user.id))return forbidden_();
+    if(['PendingPayment','AwaitingVerification'].indexOf(String(task.taskStatus))>=0 && new Date(task.createdAt).getTime() < Date.now()-24*3600000){ this.expirePending_(); return fail_('This task payment window has expired'); }
     const c=this.config_();
     if(!c.accountNumber)return fail_('DoForYou payment account is not configured');
     let payment=DB.where_('Payments',function(p){return String(p.taskId)===String(task.id)&&p.type==='TASK_PAYMENT';})[0];
