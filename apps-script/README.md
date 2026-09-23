@@ -30,7 +30,7 @@ GET requests may use `?path=/categories&token=...`
 
 ## Manual task payment flow
 
-`Create task -> PendingPayment -> customer EFT -> payment submission -> AwaitingVerification -> admin bank check -> Verified -> Posted + EscrowHeld`.
+`Create task -> PendingPayment -> customer EFT -> payment submission -> payment AwaitingVerification while task remains PendingPayment -> admin bank check -> Verified -> Posted + EscrowHeld`.
 
 The customer payment is made manually to:
 
