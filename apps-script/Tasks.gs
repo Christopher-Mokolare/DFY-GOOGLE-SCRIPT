@@ -2,6 +2,8 @@ const Tasks = {
   create: function(body,user){
     if(!Auth.profileCompletion_(user).complete) return fail_('Please complete your profile before creating tasks');
     if(!Auth.canCreate_(user)) return fail_('Only Creators and Both accounts can post tasks.');
+    const moderation=ContentModeration.validateTask_(body);
+    if(!moderation.allowed) return fail_(moderation.message,{field:moderation.field,category:moderation.category});
     const budget=Util.money(body.budget);
     if(budget<50) return fail_('validation failed: minimum budget is R50');
     const commission=Util.commission(budget);
@@ -68,7 +70,12 @@ const Tasks = {
   update: function(taskId,body,user){
     const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)&&String(x.createdByUserId)===String(user.id));
     if(!t) return fail_('Task not found'); if(t.taskStatus!=='PendingPayment') return fail_('Only pending payment tasks can be edited');
+    const nextTaskName=body.taskName!==undefined?String(body.taskName).trim():t.taskName;
+    const nextTaskDescription=body.taskDescription!==undefined?String(body.taskDescription).trim():t.taskDescription;
+    const moderation=ContentModeration.validateTaskValues_(nextTaskName,nextTaskDescription);
+    if(!moderation.allowed) return fail_(moderation.message,{field:moderation.field,category:moderation.category});
     const patch={updatedAt:Util.iso()};
+    if(body.taskName!==undefined) patch.taskName=nextTaskName;
     ['taskDescription','category','area','priority','notes','dateNeeded'].forEach(k=>{if(body[k]!==undefined)patch[k]=body[k]});
     if(body.budget!==undefined&&Number(body.budget)>=50){patch.budget=Util.money(body.budget);patch.commissionAmount=Util.commission(patch.budget);patch.payoutAmount=Util.money(patch.budget-patch.commissionAmount);}
     DB.update_('Tasks',t.id,patch); return ok_({taskId:t.taskId},'Task updated successfully');
