@@ -1,10 +1,11 @@
 const Router = {
   handle:function(path,method,body,token,query){
     currentToken_=token||'';
-    const publicPaths=['/auth/login','/auth/register','/public/stats','/categories'];
+    const publicPaths=['/auth/login','/auth/register','/public/stats','/categories','/payments/ozow/notify'];
     let user=null;
     if(publicPaths.indexOf(path)<0) user=Auth.require(token);
 
+    if(path==='/payments/ozow/notify'&&method==='POST') return Payments.handleOzowNotification_(body);
     if(path==='/public/stats') return ok_({availableTasks:DB.where_('Tasks',t=>t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld').length,completedTasks:DB.where_('Tasks',t=>t.taskStatus==='RunnerPaid').length});
     if(path==='/auth/login'&&method==='POST') return Auth.login(body);
     if(path==='/auth/register'&&method==='POST') return (function(){const u=Auth.createUser_(body);return Auth.login({email:u.email,password:body.password});})();
@@ -26,7 +27,7 @@ const Router = {
     if(path==='/tasks/payment-history'&&method==='GET') return Tasks.paymentHistory(user);
     if(path==='/tasks/cleanup'&&method==='POST') return Tasks.cleanup(user);
     const taskMatch=path.match(/^\/tasks\/([^/]+)(?:\/(.*))?$/);
-    if(taskMatch){const id=taskMatch[1],action=taskMatch[2]||'';if(!action&&method==='GET')return Tasks.get(id,user);if(!action&&method==='PUT')return Tasks.update(id,body,user);if(action==='claim'&&method==='POST')return Tasks.claim(id,body,user);if(action==='complete'&&method==='POST')return Tasks.complete(id,user);if(action==='confirm'&&method==='POST')return Tasks.confirm(id,user);if(action==='cancel'&&method==='POST')return Tasks.cancel(id,body,user);if(action==='messages'&&method==='GET')return Messages.list(id,user);if(action==='messages'&&method==='POST')return Messages.send(id,body,user);if(action==='messages/read'&&method==='PUT')return Messages.read(id,user);if(action==='progress'&&method==='POST'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id));const p=DB.insert_('Progress',{id:DB.nextId_('Progress'),taskId:t.id,userId:user.id,message:body.progressNote||body.message||'',createdAt:Util.iso()});return ok_(p);}if(action==='payment-url'&&method==='GET')return ok_({paymentUrl:null,message:'No external payment provider is configured; payment is managed by the internal ledger.'});}
+    if(taskMatch){const id=taskMatch[1],action=taskMatch[2]||'';if(!action&&method==='GET')return Tasks.get(id,user);if(!action&&method==='PUT')return Tasks.update(id,body,user);if(action==='claim'&&method==='POST')return Tasks.claim(id,body,user);if(action==='complete'&&method==='POST')return Tasks.complete(id,user);if(action==='confirm'&&method==='POST')return Tasks.confirm(id,user);if(action==='cancel'&&method==='POST')return Tasks.cancel(id,body,user);if(action==='messages'&&method==='GET')return Messages.list(id,user);if(action==='messages'&&method==='POST')return Messages.send(id,body,user);if(action==='messages/read'&&method==='PUT')return Messages.read(id,user);if(action==='progress'&&method==='POST'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id));const p=DB.insert_('Progress',{id:DB.nextId_('Progress'),taskId:t.id,userId:user.id,message:body.progressNote||body.message||'',createdAt:Util.iso()});return ok_(p);}if(action==='payment-url'&&method==='GET'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id)||String(x.id)===String(id));if(!t)return fail_('Task not found');if(String(t.createdByUserId)!==String(user.id))return forbidden_();return Payments.createPaymentRequest_(t,user);}}
     if(path==='/banking/accounts'&&method==='GET')return Banking.accounts(user);
     if(path==='/banking/accounts'&&method==='POST')return Banking.add(body,user);
     const bv=path.match(/^\/banking\/bank-accounts\/(\d+)\/verify$/);if(bv&&method==='POST')return Banking.verify(Number(bv[1]),user);
