@@ -41,6 +41,8 @@ export const tasksApi = {
   getRecentActivity: (limit = 5) => api.get(`/tasks/dashboard/activity?limit=${limit}`),
   getPaymentHistory: () => api.get('/tasks/payment-history'),
   getPaymentUrl: (id: string) => api.get(`/tasks/${id}/payment-url`),
+  submitManualPayment: (id: string, data: { paidAmount: number; senderReference: string; paidAt: string; proofOfPayment?: string }) =>
+    api.post(`/tasks/${id}/payment-submit`, data),
   cleanup: () => api.post('/tasks/cleanup', {}),
   getFilters: () => api.get('/tasks/filters'),
 }
@@ -61,6 +63,9 @@ export const supportApi = {
 export const adminApi = {
   getDashboard: () => api.get('/admin/dashboard'),
   getPayments: () => api.get('/admin/payments'),
+  getPendingManualPayments: () => api.get('/admin/payments/pending'),
+  verifyManualPayment: (id: number, amount: number, note = '') => api.post(`/admin/payments/${id}/verify`, { amount, note }),
+  rejectManualPayment: (id: number, reason: string) => api.post(`/admin/payments/${id}/reject`, { reason }),
   getTasks: (params?: object) => api.get('/admin/tasks', { params }),
   verifyPayment: (id: string, reason: string) => api.patch(`/admin/tasks/${id}/verify`, { reason }),
   unverifyPayment: (id: string, reason: string) => api.patch(`/admin/tasks/${id}/unverify`, { reason }),
