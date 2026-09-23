@@ -30,6 +30,7 @@ import AdminPayments from './pages/admin/AdminPayments'
 import AdminDisputes from './pages/admin/AdminDisputes'
 import AdminAuditLog from './pages/admin/AdminAuditLog'
 import { PaymentSuccess, PaymentCancelled } from './pages/PaymentPages'
+import ManualPayment from './pages/ManualPayment'
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/tasks/browse" element={<BrowseErrands />} />
               <Route path="/payments/success" element={<PaymentSuccess />} />
+              <Route path="/tasks/payment" element={<RequireAuth><ManualPayment /></RequireAuth>} />
               <Route path="/payments/cancelled" element={<PaymentCancelled />} />
 
               <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
