@@ -255,6 +255,7 @@ const DB = {
 
 const Audit = { log_:function(userId,action,entityType,entityId,oldValues,newValues){return DB.insert_('AuditLogs',{id:DB.nextId_('AuditLogs'),userId:userId||'',action:action,entityType:entityType,entityId:entityId||'',oldValues:oldValues||'',newValues:newValues||'',createdAt:Util.iso()});} };
 
+
 // ============================================================
 // Auth.gs
 // ============================================================
@@ -315,6 +316,13 @@ const Banking = {
 // ============================================================
 
 const Payments = {
+  holdForTask_: function(task,user){
+    if(!task) return fail_('Task not found');
+    DB.update_('Tasks',task.id,{paymentStatus:'EscrowHeld',taskStatus:'Posted',escrowStatus:'held',updatedAt:Util.iso()});
+    const payment=DB.where_('Payments',p=>String(p.taskId)===String(task.id)&&p.type==='TASK_PAYMENT')[0];
+    if(payment) DB.update_('Payments',payment.id,{status:'HELD',updatedAt:Util.iso(),metadata:'internal-ledger'});
+    return ok_(DB.findById_('Tasks',task.id),'Payment recorded in internal ledger');
+  },
   createForTask_: function(task,user){
     const ref='DFY-PAY-'+task.taskId;
     const existing=DB.where_('Payments',p=>String(p.taskId)===String(task.id)&&p.type==='TASK_PAYMENT')[0];
@@ -358,13 +366,15 @@ const Tasks = {
       paymentStatus:'Pending',taskStatus:'PendingPayment',escrowStatus:'pending',escrowHoldUntil:'',payoutStatus:'',payoutReference:'',
       payoutInitiatedAt:'',payoutCompletedAt:'',completedAt:'',createdAt:Util.iso(),updatedAt:Util.iso(),isDeleted:false,deletedAt:''});
     Payments.createForTask_(task,user);
+    Payments.holdForTask_(task,user);
+    task=DB.findById_('Tasks',task.id);
     Audit.log_(user.id,'CreateTask','Task',task.id,'',JSON.stringify(task));
     return ok_(Object.assign({paymentUrl:null},Util.taskDto(task)),'Task created');
   },
   get: function(taskId,user){ const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)||String(x.id)===String(taskId)); return t?ok_(Util.taskDto(t),'Task retrieved successfully'):fail_('Task not found'); },
   available: function(query,user){
     const page=Math.max(1,Number(query.page||1)), size=Math.min(100,Math.max(1,Number(query.pageSize||10))), filters=query||{};
-    const all=DB.where_('Tasks',t=>!String(t.isDeleted)==='true'&&t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld'&&String(t.createdByUserId)!==String(user.id)&&(!filters.category||t.category===filters.category)&&(!filters.area||String(t.area).toLowerCase().indexOf(String(filters.area).toLowerCase())>=0));
+    const all=DB.where_('Tasks',t=>String(t.isDeleted)!=='true'&&t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld'&&String(t.createdByUserId)!==String(user.id)&&(!filters.category||t.category===filters.category)&&(!filters.area||String(t.area).toLowerCase().indexOf(String(filters.area).toLowerCase())>=0));
     return {success:true,data:all.slice((page-1)*size,page*size).map(Util.taskDto),count:all.length,page:page,pageSize:size,totalPages:Math.ceil(all.length/size),message:'Available tasks retrieved'};
   },
   myPosted: function(user){return ok_(DB.where_('Tasks',t=>String(t.createdByUserId)===String(user.id)&&String(t.isDeleted)!=='true').sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(Util.taskDto));},
@@ -462,6 +472,7 @@ const Notifications = {
   clear:function(user){DB.where_('Notifications',n=>String(n.userId)===String(user.id)&&String(n.isRead)==='true').forEach(n=>DB.delete_('Notifications',n.id));return ok_(true);}
 };
 
+
 // ============================================================
 // Ratings.gs
 // ============================================================
@@ -471,6 +482,7 @@ const Ratings = {
   forUser:function(userId,q){const all=DB.where_('Ratings',r=>String(r.ratedUserId)===String(userId));const size=Number(q.pageSize||5),page=Number(q.page||1);return ok_({ratings:all.slice((page-1)*size,page*size),count:all.length,totalPages:Math.ceil(all.length/size),page:page,pageSize:size,average:all.length?all.reduce((s,r)=>s+Number(r.ratingValue),0)/all.length:0});},
   canRate:function(taskId,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId));if(!t)return ok_(false);return ok_((String(t.createdByUserId)===String(user.id)||String(t.acceptedByUserId)===String(user.id))&&['RunnerPaid','Completed'].indexOf(t.taskStatus)>=0&&!DB.where_('Ratings',r=>String(r.taskId)===String(t.id)&&String(r.ratedByUserId)===String(user.id)).length);}
 };
+
 
 // ============================================================
 // Triggers.gs
@@ -483,6 +495,9 @@ function hourlyMaintenance() {
 }
 
 function installTriggers() {
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'hourlyMaintenance') ScriptApp.deleteTrigger(trigger);
+  });
   ScriptApp.newTrigger('hourlyMaintenance').timeBased().everyHours(1).create();
 }
 
@@ -564,3 +579,103 @@ const Router = {
 };
 
 var currentToken_='';
+
+// ============================================================
+// Notification helpers
+// ============================================================
+
+const Notify = {
+  user_: function(userId,type,title,message,relatedTaskId) {
+    return DB.insert_('Notifications',{
+      id:DB.nextId_('Notifications'), userId:userId, type:type, title:title,
+      message:message, isRead:false, relatedTaskId:relatedTaskId||'', createdAt:Util.iso()
+    });
+  },
+  task_: function(userId,type,title,message,taskId) {
+    return this.user_(userId,type,title,message,taskId);
+  },
+  allAdmins: function(type,title,message,relatedTaskId) {
+    DB.where_('Users',function(u){
+      return String(u.roles||'').split(',').indexOf('Admin') >= 0;
+    }).forEach(function(admin){
+      Notify.user_(admin.id,type,title,message,relatedTaskId);
+    });
+  }
+};
+
+// ============================================================
+// Self-test
+// ============================================================
+
+function selfTest() {
+  DB.ensureSheets_();
+  const suffix=Date.now();
+  let creator=null, runner=null, bank=null, task=null;
+  const cleanup=function(name,id){
+    try { if(id!==null && id!==undefined) DB.delete_(name,id); } catch(e) {}
+  };
+  try {
+    creator=Auth.createUser_({
+      email:'selftest.creator.'+suffix+'@doforyou.local', password:'SelfTest!123',
+      firstName:'Self', lastName:'Creator', userType:'Creator', roles:'User',
+      phoneNumber:'0000000000', idNumber:'9001015009087', address:'Test Address',
+      dateOfBirth:'1990-01-01', isVerified:true
+    });
+    runner=Auth.createUser_({
+      email:'selftest.runner.'+suffix+'@doforyou.local', password:'SelfTest!123',
+      firstName:'Self', lastName:'Runner', userType:'Runner', roles:'User',
+      phoneNumber:'0000000001', idNumber:'9001015009088', address:'Test Address',
+      dateOfBirth:'1990-01-01', isVerified:true
+    });
+    bank=DB.insert_('BankAccounts',{
+      id:DB.nextId_('BankAccounts'),userId:runner.id,bankName:'Test Bank',
+      bankGroupId:'TEST',accountNumber:'1234567890',accountHolderName:'Self Runner',
+      branchCode:'000000',accountType:'Cheque',isVerified:true,isActive:true,
+      createdAt:Util.iso(),verifiedAt:Util.iso()
+    });
+    const creatorUser=DB.findById_('Users',creator.id);
+    task=Tasks.create({
+      taskName:'Self Test Task',taskDescription:'Internal payment flow test',
+      category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,
+      notes:'',priority:'Normal'
+    },creatorUser);
+    if(!task.success) throw new Error('Create failed: '+task.message);
+    const taskId=task.data.taskId;
+    const rawTask=DB.rows_('Tasks').find(function(t){return String(t.taskId)===String(taskId);});
+    if(rawTask.taskStatus!=='Posted'||rawTask.paymentStatus!=='EscrowHeld'||rawTask.escrowStatus!=='held')
+      throw new Error('Payment hold state was not established');
+    const claimed=Tasks.claim(taskId,{},DB.findById_('Users',runner.id));
+    if(!claimed.success) throw new Error('Claim failed: '+claimed.message);
+    const completed=Tasks.complete(taskId,DB.findById_('Users',runner.id));
+    if(!completed.success) throw new Error('Complete failed: '+completed.message);
+    const confirmed=Tasks.confirm(taskId,DB.findById_('Users',creator.id));
+    if(!confirmed.success) throw new Error('Confirm failed: '+confirmed.message);
+    const finalTask=DB.findById_('Tasks',rawTask.id);
+    const payouts=DB.where_('Payouts',function(p){return String(p.taskId)===String(rawTask.id);});
+    if(finalTask.taskStatus!=='PayoutPending') throw new Error('Unexpected final task status: '+finalTask.taskStatus);
+    if(finalTask.paymentStatus!=='EscrowReleased') throw new Error('Unexpected payment status: '+finalTask.paymentStatus);
+    if(payouts.length!==1) throw new Error('Expected one payout, found '+payouts.length);
+    return {passed:true,taskId:taskId,budget:Number(finalTask.budget),commission:Number(finalTask.commissionAmount),
+      payout:Number(payouts[0].amount),finalTaskStatus:finalTask.taskStatus,
+      paymentStatus:finalTask.paymentStatus,message:'Self-test passed'};
+  } finally {
+    if(task && task.data && task.data.id) {
+      const tid=task.data.id;
+      DB.where_('Payments',function(p){return String(p.taskId)===String(tid);}).forEach(function(p){cleanup('Payments',p.id);});
+      DB.where_('Payouts',function(p){return String(p.taskId)===String(tid);}).forEach(function(p){cleanup('Payouts',p.id);});
+      DB.where_('Messages',function(m){return String(m.taskId)===String(tid);}).forEach(function(m){cleanup('Messages',m.id);});
+      DB.where_('Notifications',function(n){return String(n.relatedTaskId)===String(tid);}).forEach(function(n){cleanup('Notifications',n.id);});
+      DB.where_('AuditLogs',function(a){return String(a.entityId)===String(tid);}).forEach(function(a){cleanup('AuditLogs',a.id);});
+      cleanup('Tasks',tid);
+    }
+    if(bank) cleanup('BankAccounts',bank.id);
+    if(runner) {
+      DB.where_('Sessions',function(x){return String(x.userId)===String(runner.id);}).forEach(function(x){cleanup('Sessions',x.id);});
+      cleanup('Users',runner.id);
+    }
+    if(creator) {
+      DB.where_('Sessions',function(x){return String(x.userId)===String(creator.id);}).forEach(function(x){cleanup('Sessions',x.id);});
+      cleanup('Users',creator.id);
+    }
+  }
+}
