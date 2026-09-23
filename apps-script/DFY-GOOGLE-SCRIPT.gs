@@ -663,70 +663,36 @@ const Notify = {
 function selfTest() {
   DB.ensureSheets_();
   const suffix=Date.now();
-  let creator=null, runner=null, bank=null, task=null;
-  const cleanup=function(name,id){
-    try { if(id!==null && id!==undefined) DB.delete_(name,id); } catch(e) {}
-  };
+  let creator=null, task=null;
+  const cleanup=function(name,id){try{if(id!==null&&id!==undefined)DB.delete_(name,id);}catch(e){}};
   try {
     creator=Auth.createUser_({
-      email:'selftest.creator.'+suffix+'@doforyou.local', password:'SelfTest!123',
-      firstName:'Self', lastName:'Creator', userType:'Creator', roles:'User',
-      phoneNumber:'0000000000', idNumber:'9001015009087', address:'Test Address',
-      dateOfBirth:'1990-01-01', isVerified:true
-    });
-    runner=Auth.createUser_({
-      email:'selftest.runner.'+suffix+'@doforyou.local', password:'SelfTest!123',
-      firstName:'Self', lastName:'Runner', userType:'Runner', roles:'User',
-      phoneNumber:'0000000001', idNumber:'9001015009088', address:'Test Address',
-      dateOfBirth:'1990-01-01', isVerified:true
-    });
-    bank=DB.insert_('BankAccounts',{
-      id:DB.nextId_('BankAccounts'),userId:runner.id,bankName:'Test Bank',
-      bankGroupId:'TEST',accountNumber:'1234567890',accountHolderName:'Self Runner',
-      branchCode:'000000',accountType:'Cheque',isVerified:true,isActive:true,
-      createdAt:Util.iso(),verifiedAt:Util.iso()
+      email:'selftest.creator.'+suffix+'@doforyou.local',password:'SelfTest!123',
+      firstName:'Self',lastName:'Creator',userType:'Creator',roles:'User',
+      phoneNumber:'0000000000',idNumber:'9001015009087',address:'Test Address',
+      dateOfBirth:'1990-01-01',isVerified:true
     });
     const creatorUser=DB.findById_('Users',creator.id);
     task=Tasks.create({
-      taskName:'Self Test Task',taskDescription:'Internal payment flow test',
-      category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,
-      notes:'',priority:'Normal'
+      taskName:'Self Test Task',taskDescription:'Ozow payment request test',
+      category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'
     },creatorUser);
-    if(!task.success) throw new Error('Create failed: '+task.message);
-    const taskId=task.data.taskId;
-    const rawTask=DB.rows_('Tasks').find(function(t){return String(t.taskId)===String(taskId);});
-    if(rawTask.taskStatus!=='Posted'||rawTask.paymentStatus!=='EscrowHeld'||rawTask.escrowStatus!=='held')
-      throw new Error('Payment hold state was not established');
-    const claimed=Tasks.claim(taskId,{},DB.findById_('Users',runner.id));
-    if(!claimed.success) throw new Error('Claim failed: '+claimed.message);
-    const completed=Tasks.complete(taskId,DB.findById_('Users',runner.id));
-    if(!completed.success) throw new Error('Complete failed: '+completed.message);
-    const confirmed=Tasks.confirm(taskId,DB.findById_('Users',creator.id));
-    if(!confirmed.success) throw new Error('Confirm failed: '+confirmed.message);
-    const finalTask=DB.findById_('Tasks',rawTask.id);
-    const payouts=DB.where_('Payouts',function(p){return String(p.taskId)===String(rawTask.id);});
-    if(finalTask.taskStatus!=='PayoutPending') throw new Error('Unexpected final task status: '+finalTask.taskStatus);
-    if(finalTask.paymentStatus!=='EscrowReleased') throw new Error('Unexpected payment status: '+finalTask.paymentStatus);
-    if(payouts.length!==1) throw new Error('Expected one payout, found '+payouts.length);
-    return {passed:true,taskId:taskId,budget:Number(finalTask.budget),commission:Number(finalTask.commissionAmount),
-      payout:Number(payouts[0].amount),finalTaskStatus:finalTask.taskStatus,
-      paymentStatus:finalTask.paymentStatus,message:'Self-test passed'};
+    if(!task.success)throw new Error('Create/payment request failed: '+task.message);
+    const rawTask=DB.rows_('Tasks').find(function(t){return String(t.taskId)===String(task.data.taskId);});
+    if(!rawTask)throw new Error('Task was not created');
+    if(rawTask.taskStatus!=='PendingPayment'||rawTask.paymentStatus!=='Pending'||rawTask.escrowStatus!=='pending')
+      throw new Error('Task was not left pending before verified payment');
+    if(!task.data.paymentUrl)throw new Error('Ozow payment URL was not created');
+    return {passed:true,taskId:rawTask.taskId,budget:Number(rawTask.budget),paymentUrl:task.data.paymentUrl,
+      taskStatus:rawTask.taskStatus,paymentStatus:rawTask.paymentStatus,
+      message:'Payment-request self-test passed. Complete the Ozow checkout and verify the notification to test posting.'};
   } finally {
-    if(task && task.data && task.data.id) {
+    if(task&&task.data&&task.data.id){
       const tid=task.data.id;
       DB.where_('Payments',function(p){return String(p.taskId)===String(tid);}).forEach(function(p){cleanup('Payments',p.id);});
-      DB.where_('Payouts',function(p){return String(p.taskId)===String(tid);}).forEach(function(p){cleanup('Payouts',p.id);});
-      DB.where_('Messages',function(m){return String(m.taskId)===String(tid);}).forEach(function(m){cleanup('Messages',m.id);});
-      DB.where_('Notifications',function(n){return String(n.relatedTaskId)===String(tid);}).forEach(function(n){cleanup('Notifications',n.id);});
-      DB.where_('AuditLogs',function(a){return String(a.entityId)===String(tid);}).forEach(function(a){cleanup('AuditLogs',a.id);});
-      cleanup('Tasks',tid);
+      DB.where_('Tasks',function(t){return String(t.id)===String(tid);}).forEach(function(t){cleanup('Tasks',t.id);});
     }
-    if(bank) cleanup('BankAccounts',bank.id);
-    if(runner) {
-      DB.where_('Sessions',function(x){return String(x.userId)===String(runner.id);}).forEach(function(x){cleanup('Sessions',x.id);});
-      cleanup('Users',runner.id);
-    }
-    if(creator) {
+    if(creator){
       DB.where_('Sessions',function(x){return String(x.userId)===String(creator.id);}).forEach(function(x){cleanup('Sessions',x.id);});
       cleanup('Users',creator.id);
     }
