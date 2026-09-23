@@ -44,6 +44,12 @@ The backend also creates an internal task payment reference such as `DFY-123` so
 
 Submitting a Proof of Payment does not prove that money has cleared. Only an Admin verification action can move the task to `Posted` / `EscrowHeld`.
 
+## Task content moderation
+
+Task names and descriptions are checked server-side before a task is created and again when a pending task is edited. The moderation layer blocks clearly identified profanity, sexually explicit content, sexual solicitation and hate/slur terms, including common obfuscation such as punctuation-separated or substituted characters.
+
+Blocked content is rejected before the task/payment record is created or updated. Moderation is enforced in Apps Script and is therefore not dependent on frontend validation.
+
 ## API
 
 Customer:
