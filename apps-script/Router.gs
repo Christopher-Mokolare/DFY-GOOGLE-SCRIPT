@@ -8,7 +8,7 @@ const Router = {
     if(path==='/public/stats') return ok_({availableTasks:DB.where_('Tasks',t=>t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld').length,completedTasks:DB.where_('Tasks',t=>t.taskStatus==='RunnerPaid').length});
     if(path==='/auth/login'&&method==='POST') return Auth.login(body);
     if(path==='/auth/register'&&method==='POST') return (function(){const u=Auth.createUser_(body);return Auth.login({email:u.email,password:body.password});})();
-    if(path==='/auth/change-password'&&method==='POST') return fail_('Password change endpoint is available after session validation; use /user/profile for profile updates');
+    if(path==='/auth/change-password'&&method==='POST'){const current=String(body.currentPassword||'');const next=String(body.newPassword||'');if(!current||!next)return fail_('Current and new passwords are required');if(current===next)return fail_('New password must be different from the current password');const stored=DB.findById_('Users',user.id);if(!stored||Util.passwordHash(current,stored.salt)!==stored.passwordHash)return fail_('Current password is incorrect');const salt=Util.token();DB.update_('Users',user.id,{salt:salt,passwordHash:Util.passwordHash(next,salt)});return ok_(true,'Password changed successfully');}
 
     if(path==='/user/profile'&&method==='GET') return ok_(Util.userDto(user));
     if(path==='/user/profile'&&method==='PUT'){DB.update_('Users',user.id,body);return ok_(Util.userDto(DB.findById_('Users',user.id)),'Profile updated');}
