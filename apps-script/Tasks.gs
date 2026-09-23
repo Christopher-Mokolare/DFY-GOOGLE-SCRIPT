@@ -4,20 +4,24 @@ const Tasks = {
     if(!Auth.canCreate_(user)) return fail_('Only Creators and Both accounts can post tasks.');
     const budget=Util.money(body.budget);
     if(budget<50) return fail_('validation failed: minimum budget is R50');
-    const commission=Util.commission(budget), task=DB.insert_('Tasks',{id:DB.nextId_('Tasks'),taskId:'DFY-'+Math.floor(Date.now()/1000)+'-'+Math.floor(1000+Math.random()*9000),
+    const commission=Util.commission(budget);
+    let task=DB.insert_('Tasks',{id:DB.nextId_('Tasks'),taskId:'DFY-'+Math.floor(Date.now()/1000)+'-'+Math.floor(1000+Math.random()*9000),
       taskName:String(body.taskName||body.title||'Task').trim(),taskDescription:String(body.taskDescription||body.description||'').trim(),category:body.category||'Other',
       area:body.area||body.location||'',dateNeeded:body.dateNeeded||'',budget:budget,commissionAmount:commission,payoutAmount:Util.money(budget-commission),
       notes:body.notes||'',priority:body.priority||'Normal',createdByUserId:user.id,acceptedByUserId:'',helperName:'',helperContact:'',
       paymentStatus:'Pending',taskStatus:'PendingPayment',escrowStatus:'pending',escrowHoldUntil:'',payoutStatus:'',payoutReference:'',
       payoutInitiatedAt:'',payoutCompletedAt:'',completedAt:'',createdAt:Util.iso(),updatedAt:Util.iso(),isDeleted:false,deletedAt:''});
     Payments.createForTask_(task,user);
+    const paymentRequest=Payments.createPaymentRequest_(task,user);
+    if(!paymentRequest.success){Audit.log_(user.id,'CreateTaskPaymentFailed','Task',task.id,'',paymentRequest.message);return fail_(paymentRequest.message,{taskId:task.taskId,task:Util.taskDto(task),paymentUrl:null});}
+    task=DB.findById_('Tasks',task.id);
     Audit.log_(user.id,'CreateTask','Task',task.id,'',JSON.stringify(task));
-    return ok_(Object.assign({paymentUrl:null},Util.taskDto(task)),'Task created');
+    return ok_(Object.assign({paymentUrl:paymentRequest.data.paymentUrl},Util.taskDto(task)),'Task created. Complete payment to post the task.');
   },
   get: function(taskId,user){ const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)||String(x.id)===String(taskId)); return t?ok_(Util.taskDto(t),'Task retrieved successfully'):fail_('Task not found'); },
   available: function(query,user){
     const page=Math.max(1,Number(query.page||1)), size=Math.min(100,Math.max(1,Number(query.pageSize||10))), filters=query||{};
-    const all=DB.where_('Tasks',t=>!String(t.isDeleted)==='true'&&t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld'&&String(t.createdByUserId)!==String(user.id)&&(!filters.category||t.category===filters.category)&&(!filters.area||String(t.area).toLowerCase().indexOf(String(filters.area).toLowerCase())>=0));
+    const all=DB.where_('Tasks',t=>String(t.isDeleted)!=='true'&&t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld'&&String(t.createdByUserId)!==String(user.id)&&(!filters.category||t.category===filters.category)&&(!filters.area||String(t.area).toLowerCase().indexOf(String(filters.area).toLowerCase())>=0));
     return {success:true,data:all.slice((page-1)*size,page*size).map(Util.taskDto),count:all.length,page:page,pageSize:size,totalPages:Math.ceil(all.length/size),message:'Available tasks retrieved'};
   },
   myPosted: function(user){return ok_(DB.where_('Tasks',t=>String(t.createdByUserId)===String(user.id)&&String(t.isDeleted)!=='true').sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(Util.taskDto));},
