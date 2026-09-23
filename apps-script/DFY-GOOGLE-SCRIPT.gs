@@ -319,70 +319,117 @@ const Banking = {
 const Payments = {
   config_: function(){
     const p=PropertiesService.getScriptProperties();
-    return {apiKey:String(p.getProperty('OZOW_API_KEY')||'').trim(),siteCode:String(p.getProperty('OZOW_SITE_CODE')||'').trim(),
-      privateKey:String(p.getProperty('OZOW_PRIVATE_KEY')||'').trim(),isTest:String(p.getProperty('OZOW_IS_TEST')||'false').toLowerCase()==='true',
-      apiUrl:String(p.getProperty('OZOW_API_URL')||'https://api.ozow.com/postpaymentrequest').trim(),
-      frontendUrl:String(p.getProperty('DFY_FRONTEND_URL')||'').trim(),successUrl:String(p.getProperty('DFY_PAYMENT_SUCCESS_URL')||'').trim(),
-      cancelUrl:String(p.getProperty('DFY_PAYMENT_CANCEL_URL')||'').trim(),errorUrl:String(p.getProperty('DFY_PAYMENT_ERROR_URL')||'').trim()};
+    return {
+      bankName:String(p.getProperty('DFY_BANK_NAME')||'Capitec – Business').trim(),
+      accountName:String(p.getProperty('DFY_BANK_ACCOUNT_NAME')||'DoForYou Freelance').trim(),
+      accountNumber:String(p.getProperty('DFY_BANK_ACCOUNT_NUMBER')||'').trim(),
+      branchCode:String(p.getProperty('DFY_BANK_BRANCH_CODE')||'').trim(),
+      accountType:String(p.getProperty('DFY_BANK_ACCOUNT_TYPE')||'Business').trim(),
+      instructions:String(p.getProperty('DFY_PAYMENT_INSTRUCTIONS')||'Make an EFT and use your full name as the bank reference. Send your Proof of Payment to WhatsApp 0795258611.').trim(),
+      whatsapp:String(p.getProperty('DFY_PAYMENT_WHATSAPP')||'0795258611').trim(),
+      termsUrl:String(p.getProperty('DFY_TERMS_URL')||'https://docs.google.com/document/d/1PnAK2JTIHw4th92ZS-wjsEokBgc4l14XZnH-UVnYvsM/edit?usp=sharing').trim()
+    };
   },
-  requireConfig_: function(){const c=this.config_(),m=[];if(!c.apiKey)m.push('OZOW_API_KEY');if(!c.siteCode)m.push('OZOW_SITE_CODE');if(!c.privateKey)m.push('OZOW_PRIVATE_KEY');return m.length?fail_('Ozow payment configuration is incomplete: '+m.join(', ')):ok_(c);},
-  sha512_: function(v){return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_512,String(v),Utilities.Charset.UTF_8).map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2);}).join('');},
-  hashRequest_: function(fields,key){return this.sha512_(fields.filter(function(v){return v!==undefined&&v!==null&&String(v)!=='';}).join('').toLowerCase()+key.toLowerCase());},
-  hashNotification_: function(d,key){return this.sha512_([d.SiteCode,d.TransactionId,d.TransactionReference,Number(d.Amount||0).toFixed(2),d.Status,d.Optional1,d.Optional2,d.Optional3,d.Optional4,d.Optional5,d.CurrencyCode,d.IsTest,d.StatusMessage,key].filter(function(v){return v!==undefined&&v!==null&&String(v)!=='';}).join('').toLowerCase());},
   createForTask_: function(task,user){
     if(!task)return fail_('Task not found');
     const existing=DB.where_('Payments',function(p){return String(p.taskId)===String(task.id)&&p.type==='TASK_PAYMENT';})[0];
     if(existing)return existing;
-    return DB.insert_('Payments',{id:DB.nextId_('Payments'),taskId:task.id,type:'TASK_PAYMENT',amount:task.budget,status:'PENDING',
-      reference:'DFY-PAY-'+task.id+'-'+Date.now(),createdAt:Util.iso(),updatedAt:Util.iso(),metadata:JSON.stringify({provider:'Ozow',status:'PENDING'})});
+    const ref='DFY-'+String(task.id);
+    return DB.insert_('Payments',{
+      id:DB.nextId_('Payments'),taskId:task.id,type:'TASK_PAYMENT',amount:task.budget,status:'PENDING',
+      reference:ref,createdAt:Util.iso(),updatedAt:Util.iso(),
+      metadata:JSON.stringify({provider:'MANUAL',status:'PENDING',bankReference:'',paidAt:'',proofOfPayment:'',senderReference:''})
+    });
   },
-  createPaymentRequest_: function(task,user){
+  manualDetails_: function(task,user){
     if(!task)return fail_('Task not found');
-    const cr=this.requireConfig_();if(!cr.success)return cr;
+    if(String(task.createdByUserId)!==String(user.id))return forbidden_();
+    const c=this.config_();
+    if(!c.accountNumber)return fail_('DoForYou payment account is not configured');
     let payment=DB.where_('Payments',function(p){return String(p.taskId)===String(task.id)&&p.type==='TASK_PAYMENT';})[0];
     if(!payment)payment=this.createForTask_(task,user);
     let meta={};try{meta=payment.metadata?JSON.parse(payment.metadata):{};}catch(_){}
-    if(meta.paymentUrl)return ok_({taskId:task.taskId,paymentId:payment.id,paymentUrl:meta.paymentUrl,transactionReference:payment.reference},'Payment request already created');
-    const c=cr.data,appUrl=ScriptApp.getService().getUrl()||'',frontend=c.frontendUrl;
-    const success=c.successUrl||frontend||appUrl,cancel=c.cancelUrl||frontend||appUrl,error=c.errorUrl||frontend||appUrl;
-    const notify=appUrl?appUrl+'?path=/payments/ozow/notify':'';
-    if(!notify)return fail_('Apps Script web app URL is unavailable. Deploy the web app before creating payments.');
-    const amount=Number(task.budget).toFixed(2),transactionReference=String(payment.reference).slice(0,19),
-      bankReference=('DFY '+String(task.taskId)).replace(/[^A-Za-z0-9 _-]/g,'').slice(0,20),isTest=c.isTest?'true':'false';
-    const payload={siteCode:c.siteCode,countryCode:'ZA',currencyCode:'ZAR',amount:amount,transactionReference:transactionReference,bankReference:bankReference,
-      cancelUrl:cancel,errorUrl:error,successUrl:success,notifyUrl:notify,isTest:c.isTest,
-      hashCheck:this.hashRequest_([c.siteCode,'ZA','ZAR',amount,transactionReference,bankReference,cancel,error,success,notify,isTest],c.privateKey)};
-    let response;try{response=UrlFetchApp.fetch(c.apiUrl,{method:'post',contentType:'application/json',headers:{Accept:'application/json',ApiKey:c.apiKey},payload:JSON.stringify(payload),muteHttpExceptions:true});}
-    catch(e){return fail_('Unable to reach Ozow: '+e.message);}
-    const http=response.getResponseCode();let result={};try{result=JSON.parse(response.getContentText()||'{}');}catch(e){return fail_('Ozow returned an invalid response.');}
-    if(http<200||http>=300||!result.url||result.errorMessage)return fail_('Ozow rejected the payment request: '+(result.errorMessage||('HTTP '+http)),{taskId:task.taskId,transactionReference:transactionReference});
-    DB.update_('Payments',payment.id,{reference:transactionReference,status:'PENDING',updatedAt:Util.iso(),metadata:JSON.stringify({provider:'Ozow',paymentRequestId:result.paymentRequestId||'',paymentUrl:result.url,transactionReference:transactionReference,status:'PENDING',isTest:c.isTest})});
-    DB.update_('Tasks',task.id,{paymentStatus:'Pending',taskStatus:'PendingPayment',escrowStatus:'pending',updatedAt:Util.iso()});
-    Audit.log_(user.id,'CreateOzowPayment','Payment',payment.id,'',JSON.stringify({taskId:task.id,transactionReference:transactionReference,isTest:c.isTest}));
-    return ok_({taskId:task.taskId,paymentId:payment.id,paymentUrl:result.url,paymentRequestId:result.paymentRequestId||null,transactionReference:transactionReference,amount:Number(task.budget)},'Payment request created');
+    return ok_({
+      taskId:task.taskId,paymentId:payment.id,amount:Number(task.budget),
+      paymentStatus:task.paymentStatus,taskStatus:task.taskStatus,
+      paymentReference:payment.reference,bankReference:meta.bankReference||'Your full name',
+      bank:{name:c.bankName,accountName:c.accountName,accountNumber:c.accountNumber,branchCode:c.branchCode,accountType:c.accountType},
+      instructions:c.instructions,whatsapp:c.whatsapp,termsUrl:c.termsUrl
+    },'Manual payment instructions');
   },
-  handleOzowNotification_: function(data){
-    const c=this.config_();if(!c.privateKey)return fail_('Ozow private key is not configured');
-    const supplied=String(data.Hash||'').toLowerCase(),expected=this.hashNotification_(data,c.privateKey).toLowerCase();
-    if(!supplied||supplied!==expected){Audit.log_(null,'OzowNotificationRejected','Payment','','',JSON.stringify({reason:'invalid_hash'}));return fail_('Invalid Ozow notification hash');}
-    if(c.siteCode&&String(data.SiteCode||'')!==c.siteCode)return fail_('Invalid Ozow site code');
-    const ref=String(data.TransactionReference||''),payment=DB.where_('Payments',function(p){return p.type==='TASK_PAYMENT'&&String(p.reference)===ref;})[0];
-    if(!payment)return fail_('Payment reference not found');
-    const task=DB.findById_('Tasks',payment.taskId);if(!task)return fail_('Task not found for payment');
-    const amount=Number(data.Amount||0);if(Math.abs(amount-Number(task.budget||0))>0.009)return fail_('Ozow amount does not match task amount');
-    if(String(data.CurrencyCode||'ZAR')!=='ZAR')return fail_('Unsupported payment currency');
-    const status=String(data.Status||'').toLowerCase(),now=Util.iso();
-    if(status==='complete'){
-      if(String(payment.status)!=='COMPLETE')DB.update_('Payments',payment.id,{status:'COMPLETE',updatedAt:now,metadata:JSON.stringify({provider:'Ozow',transactionId:data.TransactionId||'',transactionReference:ref,status:data.Status,subStatus:data.SubStatus||'',statusMessage:data.StatusMessage||'',isTest:String(data.IsTest||'').toLowerCase()==='true'})});
+  submitManual_: function(taskId,body,user){
+    const task=DB.rows_('Tasks').find(function(t){return String(t.taskId)===String(taskId)||String(t.id)===String(taskId);});
+    if(!task)return fail_('Task not found');
+    if(String(task.createdByUserId)!==String(user.id))return forbidden_();
+    if(['PendingPayment','AwaitingVerification'].indexOf(String(task.taskStatus))<0)return fail_('This task is no longer awaiting payment');
+    const amount=Util.money(body.paidAmount!==undefined?body.paidAmount:body.amount);
+    if(amount<=0)return fail_('Paid amount is required');
+    if(Math.abs(amount-Number(task.budget||0))>0.009)return fail_('Paid amount must match the task budget');
+    const senderReference=String(body.senderReference||body.paymentReference||body.reference||'').trim();
+    const paidAt=String(body.paidAt||body.paymentDate||'').trim();
+    const proof=String(body.proofOfPayment||body.proof||body.pop||'').trim();
+    if(!senderReference)return fail_('Your bank payment reference is required');
+    if(!paidAt)return fail_('Payment date is required');
+    const payment=DB.where_('Payments',function(p){return String(p.taskId)===String(task.id)&&p.type==='TASK_PAYMENT';})[0]||this.createForTask_(task,user);
+    const now=Util.iso(),meta={};
+    try{Object.assign(meta,payment.metadata?JSON.parse(payment.metadata):{});}catch(_){}
+    Object.assign(meta,{provider:'MANUAL',status:'AWAITING_VERIFICATION',senderReference:senderReference,paidAt:paidAt,proofOfPayment:proof,submittedBy:user.id,submittedAt:now});
+    DB.update_('Payments',payment.id,{amount:amount,status:'AWAITING_VERIFICATION',updatedAt:now,metadata:JSON.stringify(meta)});
+    DB.update_('Tasks',task.id,{paymentStatus:'AwaitingVerification',taskStatus:'AwaitingVerification',escrowStatus:'pending',updatedAt:now});
+    Audit.log_(user.id,'SubmitManualPayment','Payment',payment.id,'',JSON.stringify({taskId:task.id,amount:amount,senderReference:senderReference,paidAt:paidAt,hasProof:!!proof}));
+    Notify.allAdmins('payment_verification_required','Payment Awaiting Verification','A customer submitted payment for task '+task.taskId,task.id);
+    return ok_({taskId:task.taskId,paymentId:payment.id,paymentStatus:'AwaitingVerification',taskStatus:'AwaitingVerification'},'Payment submitted for verification');
+  },
+  pendingManual_: function(){
+    const rows=DB.where_('Payments',function(p){return p.type==='TASK_PAYMENT'&&p.status==='AWAITING_VERIFICATION';});
+    return ok_(rows.map(function(p){
+      const t=DB.findById_('Tasks',p.taskId),u=t?DB.findById_('Users',t.createdByUserId):null,meta={};
+      try{Object.assign(meta,p.metadata?JSON.parse(p.metadata):{});}catch(_){}
+      return {paymentId:p.id,taskId:t?t.taskId:null,amount:Number(p.amount||0),status:p.status,reference:p.reference,
+        taskName:t?t.taskName:'',customerName:u?String(u.firstName||'')+' '+String(u.lastName||''):'',customerEmail:u?u.email:'',
+        senderReference:meta.senderReference||'',paidAt:meta.paidAt||'',proofOfPayment:meta.proofOfPayment||'',submittedAt:meta.submittedAt||''};
+    }));
+  },
+  verifyManual_: function(paymentId,body,admin){
+    const lock=LockService.getScriptLock();lock.waitLock(10000);
+    try{
+      const payment=DB.findById_('Payments',Number(paymentId));
+      if(!payment||payment.type!=='TASK_PAYMENT')return fail_('Payment not found');
+      const task=DB.findById_('Tasks',payment.taskId);if(!task)return fail_('Task not found');
+      if(String(payment.status)==='VERIFIED'&&task.taskStatus==='Posted')return ok_({taskId:task.taskId,paymentStatus:'EscrowHeld',taskStatus:'Posted'},'Payment already verified');
+      if(String(payment.status)!=='AWAITING_VERIFICATION')return fail_('Payment is not awaiting verification');
+      const amount=Number(body.amount!==undefined?body.amount:payment.amount);
+      if(Math.abs(amount-Number(task.budget||0))>0.009)return fail_('Verified amount must match the task budget');
+      const now=Util.iso();
+      let meta={};try{meta=payment.metadata?JSON.parse(payment.metadata):{};}catch(_){}
+      Object.assign(meta,{provider:'MANUAL',status:'VERIFIED',verifiedBy:admin.id,verifiedAt:now,verifiedAmount:amount,adminNote:String(body.note||'').trim()});
+      DB.update_('Payments',payment.id,{status:'VERIFIED',amount:amount,updatedAt:now,metadata:JSON.stringify(meta)});
       DB.update_('Tasks',task.id,{paymentStatus:'EscrowHeld',taskStatus:'Posted',escrowStatus:'held',updatedAt:now});
-      Audit.log_(task.createdByUserId,'OzowPaymentComplete','Task',task.id,'',JSON.stringify({transactionId:data.TransactionId||'',transactionReference:ref,amount:amount}));
-      return ok_({taskId:task.taskId,paymentStatus:'EscrowHeld',taskStatus:'Posted'},'Payment confirmed and task posted');
-    }
-    const mapped=status==='cancelled'?'CANCELLED':status==='error'?'ERROR':status==='pendinginvestigation'?'PENDING_INVESTIGATION':'PENDING';
-    DB.update_('Payments',payment.id,{status:mapped,updatedAt:now,metadata:JSON.stringify({provider:'Ozow',transactionId:data.TransactionId||'',transactionReference:ref,status:data.Status,subStatus:data.SubStatus||'',statusMessage:data.StatusMessage||''})});
-    DB.update_('Tasks',task.id,{paymentStatus:mapped==='CANCELLED'?'Cancelled':'Pending',taskStatus:mapped==='CANCELLED'?'Cancelled':'PendingPayment',escrowStatus:'pending',updatedAt:now});
-    Audit.log_(task.createdByUserId,'OzowPaymentStatus','Task',task.id,'',JSON.stringify({status:data.Status,subStatus:data.SubStatus||''}));
-    return ok_({taskId:task.taskId,paymentStatus:mapped,taskStatus:mapped==='CANCELLED'?'Cancelled':'PendingPayment'},'Payment status recorded');
+      Audit.log_(admin.id,'VerifyManualPayment','Task',task.id,'',JSON.stringify({paymentId:payment.id,amount:amount}));
+      Notify.task_(task.createdByUserId,'payment_verified','Payment Received','Your payment was verified and your task has been posted.',task.id);
+      return ok_({taskId:task.taskId,paymentId:payment.id,paymentStatus:'EscrowHeld',taskStatus:'Posted'},'Payment verified and task posted');
+    }finally{lock.releaseLock();}
+  },
+  rejectManual_: function(paymentId,body,admin){
+    const payment=DB.findById_('Payments',Number(paymentId));if(!payment||payment.type!=='TASK_PAYMENT')return fail_('Payment not found');
+    const task=DB.findById_('Tasks',payment.taskId);if(!task)return fail_('Task not found');
+    if(String(payment.status)!=='AWAITING_VERIFICATION')return fail_('Payment is not awaiting verification');
+    const now=Util.iso(),reason=String(body.reason||'Payment could not be verified').trim();
+    let meta={};try{meta=payment.metadata?JSON.parse(payment.metadata):{};}catch(_){}
+    Object.assign(meta,{provider:'MANUAL',status:'REJECTED',rejectedBy:admin.id,rejectedAt:now,rejectionReason:reason});
+    DB.update_('Payments',payment.id,{status:'REJECTED',updatedAt:now,metadata:JSON.stringify(meta)});
+    DB.update_('Tasks',task.id,{paymentStatus:'Pending',taskStatus:'PendingPayment',escrowStatus:'pending',updatedAt:now});
+    Audit.log_(admin.id,'RejectManualPayment','Task',task.id,'',JSON.stringify({paymentId:payment.id,reason:reason}));
+    Notify.task_(task.createdByUserId,'payment_rejected','Payment Needs Attention',reason,task.id);
+    return ok_({taskId:task.taskId,paymentId:payment.id,paymentStatus:'Pending',taskStatus:'PendingPayment',reason:reason},'Payment submission rejected; task remains pending');
+  },
+  expirePending_: function(){
+    const cutoff=Date.now()-24*3600000,now=Util.iso();
+    DB.rows_('Tasks').filter(function(t){return ['PendingPayment','AwaitingVerification'].indexOf(String(t.taskStatus))>=0&&new Date(t.createdAt).getTime()<cutoff&&String(t.taskStatus)!=='Posted';}).forEach(function(t){
+      DB.update_('Tasks',t.id,{taskStatus:'Expired',paymentStatus:'Expired',escrowStatus:'pending',updatedAt:now});
+      DB.where_('Payments',function(p){return String(p.taskId)===String(t.id)&&p.type==='TASK_PAYMENT'&&['PENDING','AWAITING_VERIFICATION'].indexOf(String(p.status))>=0;}).forEach(function(p){DB.update_('Payments',p.id,{status:'EXPIRED',updatedAt:now});});
+      Audit.log_(null,'ExpireUnpaidTask','Task',t.id,'','Payment window expired');
+    });
   },
   release_: function(task,force){
     if(!task||!task.acceptedByUserId)return fail_('Task has no runner');
@@ -416,12 +463,13 @@ const Tasks = {
       notes:body.notes||'',priority:body.priority||'Normal',createdByUserId:user.id,acceptedByUserId:'',helperName:'',helperContact:'',
       paymentStatus:'Pending',taskStatus:'PendingPayment',escrowStatus:'pending',escrowHoldUntil:'',payoutStatus:'',payoutReference:'',
       payoutInitiatedAt:'',payoutCompletedAt:'',completedAt:'',createdAt:Util.iso(),updatedAt:Util.iso(),isDeleted:false,deletedAt:''});
-    Payments.createForTask_(task,user);
-    const paymentRequest=Payments.createPaymentRequest_(task,user);
-    if(!paymentRequest.success){Audit.log_(user.id,'CreateTaskPaymentFailed','Task',task.id,'',paymentRequest.message);return fail_(paymentRequest.message,{taskId:task.taskId,task:Util.taskDto(task),paymentUrl:null});}
+    const payment=Payments.createForTask_(task,user);
+    if(!payment || !payment.id){Audit.log_(user.id,'CreateTaskPaymentFailed','Task',task.id,'','Unable to create manual payment record');return fail_('Unable to create payment record',{taskId:task.taskId,task:Util.taskDto(task)});}
     task=DB.findById_('Tasks',task.id);
+    const details=Payments.manualDetails_(task,user);
+    if(!details.success)return fail_(details.message,{taskId:task.taskId,task:Util.taskDto(task)});
     Audit.log_(user.id,'CreateTask','Task',task.id,'',JSON.stringify(task));
-    return ok_(Object.assign({paymentUrl:paymentRequest.data.paymentUrl},Util.taskDto(task)),'Task created. Complete payment to post the task.');
+    return ok_(Object.assign({payment:details.data,paymentUrl:null},Util.taskDto(task)),'Task created. Complete the manual EFT payment and submit your Proof of Payment.');
   },
   get: function(taskId,user){ const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)||String(x.id)===String(taskId)); return t?ok_(Util.taskDto(t),'Task retrieved successfully'):fail_('Task not found'); },
   available: function(query,user){
@@ -483,152 +531,7 @@ const Tasks = {
     const paid=mine.filter(t=>t.taskStatus==='RunnerPaid'), payouts=DB.where_('Payouts',p=>String(p.runnerId)===String(user.id)&&p.status==='Completed');
     return ok_({postedTasks:mine.length,pendingPayment:mine.filter(t=>t.taskStatus==='PendingPayment').length,activeTasks:mine.filter(t=>['Claimed','PayoutPending'].indexOf(t.taskStatus)>=0).length,awaitingConfirmation:mine.filter(t=>t.taskStatus==='Completed').length,completedTasks:paid.length,totalSpent:paid.reduce((s,t)=>s+Number(t.budget||0),0),availableTasks:all.filter(t=>t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld').length,myActiveTasks:runner.filter(t=>t.taskStatus==='Claimed').length,runnerCompletedTasks:runner.filter(t=>['Completed','PayoutPending','RunnerPaid'].indexOf(t.taskStatus)>=0).length,totalEarnings:payouts.reduce((s,p)=>s+Number(p.amount||0),0),pendingPayouts:DB.where_('Payouts',p=>String(p.runnerId)===String(user.id)&&['Pending','Processing'].indexOf(p.status)>=0).reduce((s,p)=>s+Number(p.amount||0),0),myRating:Number(user.rating||0)}); 
   },
-  cleanup: function(user){Auth.requireAdmin(currentToken_); const cutoff=Date.now()-24*3600000; DB.rows_('Tasks').filter(t=>t.taskStatus==='PendingPayment'&&new Date(t.createdAt).getTime()<cutoff).forEach(t=>DB.update_('Tasks',t.id,{isDeleted:true,deletedAt:Util.iso(),taskStatus:'Cancelled',updatedAt:Util.iso()})); return ok_(true,'Expired tasks cleaned up');}
-};
-
-
-// ============================================================
-// Disputes.gs
-// ============================================================
-
-const Disputes = {
-  raise:function(body,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(body.taskId));if(!t)return fail_('Task not found');if(String(t.createdByUserId)!==String(user.id)&&String(t.acceptedByUserId)!==String(user.id))return fail_('Not authorized');const d=DB.insert_('Disputes',{id:DB.nextId_('Disputes'),taskId:t.id,raisedByUserId:user.id,issue:body.issue||'',category:body.category||'Other',status:'Open',resolution:'',action:'',reason:'',createdAt:Util.iso(),resolvedAt:''});Notify.allAdmins('dispute_raised','New Dispute','A dispute was raised for '+t.taskId,t.id);return ok_(d,'Dispute raised');},
-  mine:function(user){return ok_(DB.where_('Disputes',d=>String(d.raisedByUserId)===String(user.id)));},
-  all:function(user){Auth.requireAdmin(currentToken_);return ok_(DB.rows_('Disputes'));},
-  resolve:function(id,body,user){Auth.requireAdmin(currentToken_);const d=DB.findById_('Disputes',id);if(!d)return fail_('Dispute not found');const t=DB.findById_('Tasks',d.taskId);const action=body.action||'';if(action==='release_to_runner'){const r=Payments.release_(t,true);if(!r.success)return r;}else if(action==='refund_creator'){DB.insert_('Refunds',{id:DB.nextId_('Refunds'),taskId:t.id,amount:t.budget,reason:body.reason||'Dispute refund',status:'Approved',reference:'DFY-REFUND-'+t.taskId,createdAt:Util.iso(),updatedAt:Util.iso(),completedAt:''});DB.update_('Tasks',t.id,{paymentStatus:'Refunded',taskStatus:'Refunded',escrowStatus:'refunded',updatedAt:Util.iso()});}else if(action!=='close'){return fail_('Unsupported dispute resolution action');}DB.update_('Disputes',id,{status:'Resolved',resolution:body.resolution||'',action:action,reason:body.reason||'',resolvedAt:Util.iso()});Audit.log_(user.id,'ResolveDispute','Dispute',id,'',JSON.stringify(body));return ok_(true,'Dispute resolved');}
-};
-
-
-// ============================================================
-// Messages.gs
-// ============================================================
-
-const Messages = {
-  list:function(taskId,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)||String(x.id)===String(taskId));if(!t)return fail_('Task not found');if(String(t.createdByUserId)!==String(user.id)&&String(t.acceptedByUserId)!==String(user.id))return fail_('Not authorized');return ok_(DB.where_('Messages',m=>String(m.taskId)===String(t.id)).sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt)));},
-  send:function(taskId,body,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId));if(!t)return fail_('Task not found');if(String(t.createdByUserId)!==String(user.id)&&String(t.acceptedByUserId)!==String(user.id))return fail_('Not authorized');const m=DB.insert_('Messages',{id:DB.nextId_('Messages'),taskId:t.id,senderId:user.id,content:String(body.content||'').trim(),isRead:false,createdAt:Util.iso()});return ok_(m,'Message sent');},
-  read:function(taskId,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId));if(t)DB.where_('Messages',m=>String(m.taskId)===String(t.id)&&String(m.senderId)!==String(user.id)&&String(m.isRead)!=='true').forEach(m=>DB.update_('Messages',m.id,{isRead:true}));return ok_(true);},
-  system:function(taskId,userId,content){DB.insert_('Messages',{id:DB.nextId_('Messages'),taskId:taskId,senderId:userId,content:content,isRead:false,createdAt:Util.iso()});}
-};
-
-
-// ============================================================
-// Notifications.gs
-// ============================================================
-
-const Notifications = {
-  list:function(user,q){let a=DB.where_('Notifications',n=>String(n.userId)===String(user.id));if(q.type)a=a.filter(n=>n.type===q.type);if(String(q.unreadOnly)==='true')a=a.filter(n=>String(n.isRead)!=='true');const size=Number(q.pageSize||20),page=Number(q.page||1);return ok_(a.slice((page-1)*size,page*size));},
-  read:function(id,user){const n=DB.findById_('Notifications',id);if(!n||String(n.userId)!==String(user.id))return fail_('Notification not found');DB.update_('Notifications',id,{isRead:true});return ok_(true);},
-  markAll:function(user){DB.where_('Notifications',n=>String(n.userId)===String(user.id)).forEach(n=>DB.update_('Notifications',n.id,{isRead:true}));return ok_(true);},
-  markTask:function(user,body){DB.where_('Notifications',n=>String(n.userId)===String(user.id)&&String(n.relatedTaskId)===String(body.taskId)).forEach(n=>DB.update_('Notifications',n.id,{isRead:true}));return ok_(true);},
-  remove:function(id,user){const n=DB.findById_('Notifications',id);if(n&&String(n.userId)===String(user.id))DB.delete_('Notifications',id);return ok_(true);},
-  clear:function(user){DB.where_('Notifications',n=>String(n.userId)===String(user.id)&&String(n.isRead)==='true').forEach(n=>DB.delete_('Notifications',n.id));return ok_(true);}
-};
-
-
-// ============================================================
-// Ratings.gs
-// ============================================================
-
-const Ratings = {
-  submit:function(body,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(body.taskId));if(!t)return fail_('Task not found');if(['RunnerPaid','Completed'].indexOf(t.taskStatus)<0)return fail_('Task must be completed before rating');let rated;if(String(t.createdByUserId)===String(user.id)&&t.acceptedByUserId)rated=t.acceptedByUserId;else if(String(t.acceptedByUserId)===String(user.id))rated=t.createdByUserId;else return fail_('Not authorized to rate this task');if(DB.where_('Ratings',r=>String(r.taskId)===String(t.id)&&String(r.ratedByUserId)===String(user.id)).length)return fail_('Already rated this task');const r=DB.insert_('Ratings',{id:DB.nextId_('Ratings'),taskId:t.id,ratedByUserId:user.id,ratedUserId:rated,ratingValue:Number(body.ratingValue),review:body.review||'',createdAt:Util.iso()});const vals=DB.where_('Ratings',x=>String(x.ratedUserId)===String(rated)).map(x=>Number(x.ratingValue));const avg=vals.reduce((a,b)=>a+b,0)/vals.length;DB.update_('Users',rated,{rating:avg});return ok_({id:r.id},'Rating submitted');},
-  forUser:function(userId,q){const all=DB.where_('Ratings',r=>String(r.ratedUserId)===String(userId));const size=Number(q.pageSize||5),page=Number(q.page||1);return ok_({ratings:all.slice((page-1)*size,page*size),count:all.length,totalPages:Math.ceil(all.length/size),page:page,pageSize:size,average:all.length?all.reduce((s,r)=>s+Number(r.ratingValue),0)/all.length:0});},
-  canRate:function(taskId,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId));if(!t)return ok_(false);return ok_((String(t.createdByUserId)===String(user.id)||String(t.acceptedByUserId)===String(user.id))&&['RunnerPaid','Completed'].indexOf(t.taskStatus)>=0&&!DB.where_('Ratings',r=>String(r.taskId)===String(t.id)&&String(r.ratedByUserId)===String(user.id)).length);}
-};
-
-
-// ============================================================
-// Triggers.gs
-// ============================================================
-
-function hourlyMaintenance() {
-  Payments.autoRelease_();
-  const cutoff=Date.now()-24*3600000;
-  DB.rows_('Tasks').filter(t=>t.taskStatus==='PendingPayment'&&new Date(t.createdAt).getTime()<cutoff).forEach(t=>DB.update_('Tasks',t.id,{isDeleted:true,deletedAt:Util.iso(),taskStatus:'Cancelled',updatedAt:Util.iso()}));
-}
-
-function installTriggers() {
-  ScriptApp.getProjectTriggers().forEach(function(trigger) {
-    if (trigger.getHandlerFunction() === 'hourlyMaintenance') ScriptApp.deleteTrigger(trigger);
-  });
-  ScriptApp.newTrigger('hourlyMaintenance').timeBased().everyHours(1).create();
-}
-
-
-// ============================================================
-// Router.gs
-// ============================================================
-
-const Router = {
-  handle:function(path,method,body,token,query){
-    currentToken_=token||'';
-    const publicPaths=['/auth/login','/auth/register','/public/stats','/categories','/payments/ozow/notify'];
-    let user=null;
-    if(publicPaths.indexOf(path)<0) user=Auth.require(token);
-
-    if(path==='/payments/ozow/notify'&&method==='POST') return Payments.handleOzowNotification_(body);
-    if(path==='/public/stats') return ok_({availableTasks:DB.where_('Tasks',t=>t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld').length,completedTasks:DB.where_('Tasks',t=>t.taskStatus==='RunnerPaid').length});
-    if(path==='/auth/login'&&method==='POST') return Auth.login(body);
-    if(path==='/auth/register'&&method==='POST') return (function(){const u=Auth.createUser_(body);return Auth.login({email:u.email,password:body.password});})();
-    if(path==='/auth/change-password'&&method==='POST'){const current=String(body.currentPassword||'');const next=String(body.newPassword||'');if(!current||!next)return fail_('Current and new passwords are required');if(current===next)return fail_('New password must be different from the current password');const stored=DB.findById_('Users',user.id);if(!stored||Util.passwordHash(current,stored.salt)!==stored.passwordHash)return fail_('Current password is incorrect');const salt=Util.token();DB.update_('Users',user.id,{salt:salt,passwordHash:Util.passwordHash(next,salt)});return ok_(true,'Password changed successfully');}
-
-    if(path==='/user/profile'&&method==='GET') return ok_(Util.userDto(user));
-    if(path==='/user/profile'&&method==='PUT'){DB.update_('Users',user.id,body);return ok_(Util.userDto(DB.findById_('Users',user.id)),'Profile updated');}
-    if(path==='/user/validate-id'&&method==='POST') return ok_({valid:/^\d{13}$/.test(String(body.idNumber||''))});
-    if(path==='/user/preferences'&&method==='GET') return ok_(JSON.parse(user.preferences||'{}'));
-    if(path==='/user/preferences'&&method==='PUT'){DB.update_('Users',user.id,{preferences:JSON.stringify(body)});return ok_(body);}
-
-    if(path==='/categories'&&method==='GET') return ok_(DB.where_('Categories',c=>String(c.active)!=='false'));
-    if(path==='/tasks'&&method==='POST') return Tasks.create(body,user);
-    if(path==='/tasks/available'&&method==='GET') return Tasks.available(query,user);
-    if(path==='/tasks/my-posted'&&method==='GET') return Tasks.myPosted(user);
-    if(path==='/tasks/my-active'&&method==='GET') return Tasks.myActive(user);
-    if(path==='/tasks/my-completed'&&method==='GET') return Tasks.myCompleted(user);
-    if(path==='/tasks/dashboard/stats'&&method==='GET') return Tasks.stats(user);
-    if(path==='/tasks/payment-history'&&method==='GET') return Tasks.paymentHistory(user);
-    if(path==='/tasks/cleanup'&&method==='POST') return Tasks.cleanup(user);
-    const taskMatch=path.match(/^\/tasks\/([^/]+)(?:\/(.*))?$/);
-    if(taskMatch){const id=taskMatch[1],action=taskMatch[2]||'';if(!action&&method==='GET')return Tasks.get(id,user);if(!action&&method==='PUT')return Tasks.update(id,body,user);if(action==='claim'&&method==='POST')return Tasks.claim(id,body,user);if(action==='complete'&&method==='POST')return Tasks.complete(id,user);if(action==='confirm'&&method==='POST')return Tasks.confirm(id,user);if(action==='cancel'&&method==='POST')return Tasks.cancel(id,body,user);if(action==='messages'&&method==='GET')return Messages.list(id,user);if(action==='messages'&&method==='POST')return Messages.send(id,body,user);if(action==='messages/read'&&method==='PUT')return Messages.read(id,user);if(action==='progress'&&method==='POST'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id));const p=DB.insert_('Progress',{id:DB.nextId_('Progress'),taskId:t.id,userId:user.id,message:body.progressNote||body.message||'',createdAt:Util.iso()});return ok_(p);}if(action==='payment-url'&&method==='GET'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id)||String(x.id)===String(id));if(!t)return fail_('Task not found');if(String(t.createdByUserId)!==String(user.id))return forbidden_();return Payments.createPaymentRequest_(t,user);}}
-    if(path==='/banking/accounts'&&method==='GET')return Banking.accounts(user);
-    if(path==='/banking/accounts'&&method==='POST')return Banking.add(body,user);
-    const bv=path.match(/^\/banking\/bank-accounts\/(\d+)\/verify$/);if(bv&&method==='POST')return Banking.verify(Number(bv[1]),user);
-    if(path==='/banking/banks'&&method==='GET')return Banking.banks();
-
-    if(path==='/messages/conversations'&&method==='GET') return ok_([]);
-    if(path==='/disputes'&&method==='POST')return Disputes.raise(body,user);
-    if(path==='/disputes/my'&&method==='GET')return Disputes.mine(user);
-    if(path==='/disputes'&&method==='GET')return Disputes.all(user);
-    const dr=path.match(/^\/disputes\/(\d+)\/resolve$/);if(dr&&method==='PATCH')return Disputes.resolve(Number(dr[1]),body,user);
-
-    if(path==='/ratings'&&method==='POST')return Ratings.submit(body,user);
-    const rr=path.match(/^\/ratings\/user\/(\d+)$/);if(rr&&method==='GET')return Ratings.forUser(Number(rr[1]),query);
-    const cr=path.match(/^\/ratings\/can-rate\/(.+)$/);if(cr&&method==='GET')return Ratings.canRate(cr[1],user);
-
-    if(path==='/notifications'&&method==='GET')return Notifications.list(user,query);
-    if(path==='/notifications/mark-all-read'&&method==='POST')return Notifications.markAll(user);
-    if(path==='/notifications/mark-task-read'&&method==='POST')return Notifications.markTask(user,body);
-    const nr=path.match(/^\/notifications\/(\d+)\/mark-read$/);if(nr&&method==='POST')return Notifications.read(Number(nr[1]),user);
-    const nd=path.match(/^\/notifications\/(\d+)$/);if(nd&&method==='DELETE')return Notifications.remove(Number(nd[1]),user);
-    if(path==='/notifications/clear-read'&&method==='DELETE')return Notifications.clear(user);
-
-    if(path==='/support/tickets'&&method==='POST'){const t=DB.insert_('SupportTickets',{id:DB.nextId_('SupportTickets'),userId:user.id,name:body.name||user.firstName+' '+user.lastName,email:body.email||user.email,subject:body.subject||'',message:body.message||'',category:body.category||'General',priority:body.priority||'Normal',status:'Open',createdAt:Util.iso()});Notify.allAdmins('support_ticket','New Support Ticket',t.subject,t.id);return ok_(t,'Ticket created');}
-    if(path==='/support/tickets'&&method==='GET')return ok_(DB.where_('SupportTickets',t=>String(t.userId)===String(user.id)));
-    const st=path.match(/^\/support\/tickets\/(\d+)$/);if(st&&method==='GET'){const t=DB.findById_('SupportTickets',Number(st[1]));return t&&String(t.userId)===String(user.id)?ok_(t):fail_('Ticket not found');}
-
-    if(path==='/admin/dashboard'&&method==='GET'){Auth.requireAdmin(token);return ok_({users:DB.rows_('Users').length,tasks:DB.rows_('Tasks').length,payments:DB.rows_('Payments').length,pendingPayouts:DB.where_('Payouts',p=>['Pending','Processing'].indexOf(p.status)>=0).length,openDisputes:DB.where_('Disputes',d=>d.status==='Open').length});}
-    if(path==='/admin/payments'&&method==='GET'){Auth.requireAdmin(token);return ok_(DB.rows_('Payments'));}
-    if(path==='/admin/audit-logs'&&method==='GET'){Auth.requireAdmin(token);return ok_(DB.rows_('AuditLogs').slice(-Number(query.pageSize||20)).reverse());}
-    if(path==='/admin/users'&&method==='GET'){Auth.requireAdmin(token);return ok_(DB.rows_('Users').map(Util.userDto));}
-    if(path==='/admin/bank-accounts'&&method==='GET'){Auth.requireAdmin(token);return ok_(DB.rows_('BankAccounts'));}
-    if(path==='/admin/tasks'&&method==='GET'){Auth.requireAdmin(token);return ok_(DB.rows_('Tasks').map(Util.taskDto));}
-    const ah=path.match(/^\/admin\/users\/(\d+)\/tasks$/);if(ah&&method==='GET'){Auth.requireAdmin(token);return ok_(DB.where_('Tasks',t=>String(t.createdByUserId)===ah[1]||String(t.acceptedByUserId)===ah[1]).map(Util.taskDto));}
-    const am=path.match(/^\/admin\/tasks\/([^/]+)\/messages$/);if(am&&method==='GET'){Auth.requireAdmin(token);return ok_(DB.where_('Messages',m=>{const t=DB.findById_('Tasks',m.taskId);return t&&String(t.taskId)===am[1];}));}
-    const ab=path.match(/^\/admin\/bank-accounts\/(\d+)\/verify$/);if(ab&&method==='PATCH'){Auth.requireAdmin(token);const ba=DB.findById_('BankAccounts',Number(ab[1]));if(!ba)return fail_('Bank account not found');DB.update_('BankAccounts',ba.id,{isVerified:true,verifiedAt:Util.iso()});Audit.log_(user.id,'AdminVerifyBankAccount','BankAccount',ba.id,'','verified=true');return ok_(true,'Bank account verified');}
-    const av=path.match(/^\/admin\/tasks\/([^/]+)\/(verify|unverify|force-release-escrow)$/);if(av&&method==='PATCH'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(av[1]));if(!t)return fail_('Task not found');Auth.requireAdmin(token);if(av[2]==='force-release-escrow')return Payments.release_(t,true);DB.update_('Tasks',t.id,{paymentStatus:av[2]==='verify'?'EscrowHeld':'Pending',escrowStatus:av[2]==='verify'?'held':'pending',taskStatus:av[2]==='verify'?'Posted':'PendingPayment',updatedAt:Util.iso()});return ok_(true,'Payment status updated');}
-    const ar=path.match(/^\/admin\/users\/(\d+)\/(status|role)$/);if(ar&&method==='PATCH'){Auth.requireAdmin(token);const uid=Number(ar[1]);DB.update_('Users',uid,ar[2]==='status'?{isVerified:body.isVerified}:{userType:body.role});Audit.log_(user.id,'AdminUserUpdate','User',uid,'',JSON.stringify(body));return ok_(true,'User updated');}
-    const del=path.match(/^\/admin\/(tasks|users)\/(.+)$/);if(del&&method==='DELETE'){Auth.requireAdmin(token);const id=del[2];if(del[1]==='tasks'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id));if(t)DB.update_('Tasks',t.id,{isDeleted:true,deletedAt:Util.iso(),taskStatus:'Cancelled'});}else DB.delete_('Users',Number(id));return ok_(true,'Deleted');}
-
-    return fail_('Endpoint not implemented: '+method+' '+path);
-  }
+  cleanup: function(user){Auth.requireAdmin(currentToken_); Payments.expirePending_(); return ok_(true,'Expired payment requests cleaned up');}
 };
 
 var currentToken_='';
@@ -663,38 +566,27 @@ const Notify = {
 function selfTest() {
   DB.ensureSheets_();
   const suffix=Date.now();
-  let creator=null, task=null;
-  const cleanup=function(name,id){try{if(id!==null&&id!==undefined)DB.delete_(name,id);}catch(e){}};
+  let creator=null,admin=null,task=null;
   try {
-    creator=Auth.createUser_({
-      email:'selftest.creator.'+suffix+'@doforyou.local',password:'SelfTest!123',
-      firstName:'Self',lastName:'Creator',userType:'Creator',roles:'User',
-      phoneNumber:'0000000000',idNumber:'9001015009087',address:'Test Address',
-      dateOfBirth:'1990-01-01',isVerified:true
-    });
-    const creatorUser=DB.findById_('Users',creator.id);
-    task=Tasks.create({
-      taskName:'Self Test Task',taskDescription:'Ozow payment request test',
-      category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'
-    },creatorUser);
-    if(!task.success)throw new Error('Create/payment request failed: '+task.message);
-    const rawTask=DB.rows_('Tasks').find(function(t){return String(t.taskId)===String(task.data.taskId);});
-    if(!rawTask)throw new Error('Task was not created');
-    if(rawTask.taskStatus!=='PendingPayment'||rawTask.paymentStatus!=='Pending'||rawTask.escrowStatus!=='pending')
-      throw new Error('Task was not left pending before verified payment');
-    if(!task.data.paymentUrl)throw new Error('Ozow payment URL was not created');
-    return {passed:true,taskId:rawTask.taskId,budget:Number(rawTask.budget),paymentUrl:task.data.paymentUrl,
-      taskStatus:rawTask.taskStatus,paymentStatus:rawTask.paymentStatus,
-      message:'Payment-request self-test passed. Complete the Ozow checkout and verify the notification to test posting.'};
+    creator=Auth.createUser_({email:'selftest.creator.'+suffix+'@doforyou.local',password:'SelfTest!123',firstName:'Self',lastName:'Creator',userType:'Creator',roles:'User',phoneNumber:'0000000000',idNumber:'9001015009087',address:'Test Address',dateOfBirth:'1990-01-01',isVerified:true});
+    admin=Auth.createUser_({email:'selftest.admin.'+suffix+'@doforyou.local',password:'SelfTest!123',firstName:'Self',lastName:'Admin',userType:'Admin',roles:'User,Admin',isVerified:true});
+    const creatorUser=DB.findById_('Users',creator.id),adminUser=DB.findById_('Users',admin.id);
+    task=Tasks.create({taskName:'Self Test Task',taskDescription:'Manual payment test',category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'},creatorUser);
+    if(!task.success)throw new Error('Task creation failed: '+task.message);
+    let raw=DB.rows_('Tasks').find(t=>String(t.taskId)===String(task.data.taskId));
+    if(!raw||raw.taskStatus!=='PendingPayment'||raw.paymentStatus!=='Pending')throw new Error('Task did not enter PendingPayment');
+    const submit=Payments.submitManual_(raw.taskId,{paidAmount:400,senderReference:'Self Creator',paidAt:Util.iso(),proofOfPayment:'SELFTEST-POP'},creatorUser);
+    if(!submit.success)throw new Error('Manual payment submission failed: '+submit.message);
+    raw=DB.findById_('Tasks',raw.id);
+    if(raw.taskStatus!=='AwaitingVerification'||raw.paymentStatus!=='AwaitingVerification')throw new Error('Task did not enter AwaitingVerification');
+    const verify=Payments.verifyManual_(DB.where_('Payments',p=>String(p.taskId)===String(raw.id))[0].id,{amount:400,note:'Self test'},adminUser);
+    if(!verify.success)throw new Error('Manual payment verification failed: '+verify.message);
+    raw=DB.findById_('Tasks',raw.id);
+    if(raw.taskStatus!=='Posted'||raw.paymentStatus!=='EscrowHeld'||raw.escrowStatus!=='held')throw new Error('Task was not posted after verified payment');
+    return {passed:true,taskId:raw.taskId,taskStatus:raw.taskStatus,paymentStatus:raw.paymentStatus,escrowStatus:raw.escrowStatus,message:'Manual payment lifecycle self-test passed.'};
   } finally {
-    if(task&&task.data&&task.data.id){
-      const tid=task.data.id;
-      DB.where_('Payments',function(p){return String(p.taskId)===String(tid);}).forEach(function(p){cleanup('Payments',p.id);});
-      DB.where_('Tasks',function(t){return String(t.id)===String(tid);}).forEach(function(t){cleanup('Tasks',t.id);});
-    }
-    if(creator){
-      DB.where_('Sessions',function(x){return String(x.userId)===String(creator.id);}).forEach(function(x){cleanup('Sessions',x.id);});
-      cleanup('Users',creator.id);
-    }
+    if(task&&task.data&&task.data.id){const tid=task.data.id;DB.where_('Payments',p=>String(p.taskId)===String(tid)).forEach(p=>DB.delete_('Payments',p.id));DB.delete_('Tasks',tid);}
+    if(creator){DB.where_('Sessions',x=>String(x.userId)===String(creator.id)).forEach(x=>DB.delete_('Sessions',x.id));DB.delete_('Users',creator.id);}
+    if(admin){DB.where_('Sessions',x=>String(x.userId)===String(admin.id)).forEach(x=>DB.delete_('Sessions',x.id));DB.delete_('Users',admin.id);}
   }
 }
