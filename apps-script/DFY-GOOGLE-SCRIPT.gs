@@ -153,8 +153,7 @@ const DB = {
     SupportTickets: ['id','userId','name','email','subject','message','category','priority','status','createdAt'],
     AuditLogs: ['id','userId','action','entityType','entityId','oldValues','newValues','createdAt'],
     Idempotency: ['id','key','operation','result','createdAt']
-  ],
-
+  },
   open_: function() {
     const p = PropertiesService.getScriptProperties();
     let id = p.getProperty('DFY_SPREADSHEET_ID');
