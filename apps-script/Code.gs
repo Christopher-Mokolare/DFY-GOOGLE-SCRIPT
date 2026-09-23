@@ -33,8 +33,10 @@ function handleRequest_(e, method) {
 }
 
 function parseRequest_(e) {
-  if (!e || !e.postData || !e.postData.contents) return {};
-  try { return JSON.parse(e.postData.contents); } catch (_) { return {}; }
+  if (!e) return {};
+  if (e.postData && e.postData.contents) { try { return JSON.parse(e.postData.contents); } catch (_) {} }
+  if (e.parameter) return { path:e.parameter.path||'', body:e.parameter, query:e.parameter };
+  return {};
 }
 
 function normalizePath_(path) {
