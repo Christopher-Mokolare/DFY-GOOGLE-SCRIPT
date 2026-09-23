@@ -11,12 +11,13 @@ const Tasks = {
       notes:body.notes||'',priority:body.priority||'Normal',createdByUserId:user.id,acceptedByUserId:'',helperName:'',helperContact:'',
       paymentStatus:'Pending',taskStatus:'PendingPayment',escrowStatus:'pending',escrowHoldUntil:'',payoutStatus:'',payoutReference:'',
       payoutInitiatedAt:'',payoutCompletedAt:'',completedAt:'',createdAt:Util.iso(),updatedAt:Util.iso(),isDeleted:false,deletedAt:''});
-    Payments.createForTask_(task,user);
-    const paymentRequest=Payments.createPaymentRequest_(task,user);
-    if(!paymentRequest.success){Audit.log_(user.id,'CreateTaskPaymentFailed','Task',task.id,'',paymentRequest.message);return fail_(paymentRequest.message,{taskId:task.taskId,task:Util.taskDto(task),paymentUrl:null});}
+    const payment=Payments.createForTask_(task,user);
+    if(!payment || !payment.id){Audit.log_(user.id,'CreateTaskPaymentFailed','Task',task.id,'','Unable to create manual payment record');return fail_('Unable to create payment record',{taskId:task.taskId,task:Util.taskDto(task)});}
     task=DB.findById_('Tasks',task.id);
+    const details=Payments.manualDetails_(task,user);
+    if(!details.success)return fail_(details.message,{taskId:task.taskId,task:Util.taskDto(task)});
     Audit.log_(user.id,'CreateTask','Task',task.id,'',JSON.stringify(task));
-    return ok_(Object.assign({paymentUrl:paymentRequest.data.paymentUrl},Util.taskDto(task)),'Task created. Complete payment to post the task.');
+    return ok_(Object.assign({payment:details.data,paymentUrl:null},Util.taskDto(task)),'Task created. Complete the manual EFT payment and submit your Proof of Payment.');
   },
   get: function(taskId,user){ const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)||String(x.id)===String(taskId)); return t?ok_(Util.taskDto(t),'Task retrieved successfully'):fail_('Task not found'); },
   available: function(query,user){
