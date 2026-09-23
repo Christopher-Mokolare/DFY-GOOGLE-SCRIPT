@@ -1,0 +1,1 @@
+const Audit = { log_:function(userId,action,entityType,entityId,oldValues,newValues){return DB.insert_('AuditLogs',{id:DB.nextId_('AuditLogs'),userId:userId||'',action:action,entityType:entityType,entityId:entityId||'',oldValues:oldValues||'',newValues:newValues||'',createdAt:Util.iso()});} };
