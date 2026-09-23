@@ -37,3 +37,14 @@ This does not itself transfer money to a bank. A future bank/payment provider ca
 ## Security
 
 Passwords are salted and hashed. Sessions use random opaque tokens with hashed token storage. Admin endpoints require an Admin role. Task claiming uses LockService. Sensitive bank account numbers are masked in user responses. Never put provider secrets or admin credentials in Git.
+
+
+## Ozow pay-in configuration
+
+Before testing payments, set the Script Properties `OZOW_API_KEY`, `OZOW_SITE_CODE`,
+`OZOW_PRIVATE_KEY`, `OZOW_IS_TEST`, `OZOW_API_URL`, and `DFY_FRONTEND_URL`.
+The web-app URL is automatically used as Ozow's notification URL.
+
+A task remains `PendingPayment` until a valid Ozow `Complete` notification is
+received and its SHA512 hash, site code, amount, currency and transaction reference
+are verified. Only then is the task moved to `Posted` / `EscrowHeld`.
