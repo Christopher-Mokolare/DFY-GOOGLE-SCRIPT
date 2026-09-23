@@ -151,28 +151,19 @@ export default function PostErrand() {
       }
       const res = isEdit ? await tasksApi.update(editId!, payload) : await tasksApi.create(payload)
       const data = res.data
-      if (data.success !== false) {
-        const payUrl = data.data?.paymentUrl
-        if (payUrl) {
-          if (!isSafePaymentUrl(payUrl)) {
-            setError('The payment provider returned an invalid secure payment URL. Please try again.')
-            return
-          }
-          window.location.assign(payUrl)
-          return
-        }
-        navigate('/tasks/my-posted')
-      } else setError(data.message || 'Failed to create task.')
+      if (data.success === false) { setError(data.message || 'Failed to create task.'); return }
+      if (isEdit) { navigate('/tasks/my-posted'); return }
+      const taskId = String(data.data?.taskId || '')
+      if (!taskId) { setError('Task was created but no task reference was returned. Please contact support.'); return }
+      navigate('/tasks/payment?taskId=' + encodeURIComponent(taskId))
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to submit task.')
+      setError(err.response?.data?.message || err.message || 'Failed to submit task.')
     } finally { setSubmitting(false) }
   }
 
   if (!isAuthenticated()) {
     return <div className="post-page"><div className="container"><div className="login-required-card"><i className="fas fa-user-lock" /><h3>Join the Community</h3><p>Sign in to start posting tasks and connecting with helpers</p><button className="btn btn-primary btn-lg" onClick={() => navigate('/login')}><i className="fas fa-sign-in-alt" /> Sign In</button></div></div></div>
   }
-
-  const displayName = user ? (user.firstName ? `${user.firstName} ${user.lastName ?? ''}`.trim() : user.name) : ''
 
   return (
     <div className="post-page">
@@ -183,8 +174,8 @@ export default function PostErrand() {
           <p>{isEdit ? 'Update your task details and keep your task information current.' : "Turn a task on your list into an opportunity for someone in your community."}</p>
         </div>
         <div className="post-page-heading-meta">
-          <span><i className="fas fa-shield-halved" /> Secure checkout</span>
-          <span><i className="fas fa-bolt" /> Fast matching</span>
+          <span><i className="fas fa-university" /> Manual EFT</span>
+          <span><i className="fas fa-shield-halved" /> Admin verified</span>
         </div>
       </section>
       <section className="post-form-card admin-panel">
