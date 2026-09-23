@@ -58,7 +58,7 @@ const ContentModeration = {
 
     // Remove zero-width characters and collapse separators between letters.
     s = s.replace(/[\\u200b-\\u200f\\u202a-\\u202e\\ufeff]/g, '');
-    s = s.replace(/([a-z])[^a-z0-9]+(?=[a-z])/g, '$1');
+    s = s.replace(/([a-z])[^a-z0-9\\s]+(?=[a-z])/g, '$1');
     s = s.replace(/(.)\\1{3,}/g, '$1$1$1');
     s = s.replace(/\\s+/g, ' ').trim();
 
@@ -70,10 +70,11 @@ const ContentModeration = {
     if (!original) return {allowed:true, field:fieldName || '', category:'', match:''};
 
     const normalized = this.normalize_(original);
+    const compact = normalized.replace(/\\s+/g, '');
 
     for (let i=0; i<this.blockedPhrases_.length; i++) {
       const phrase = this.normalize_(this.blockedPhrases_[i]);
-      if (normalized.indexOf(phrase) >= 0) {
+      if (normalized.indexOf(phrase) >= 0 || compact.indexOf(phrase.replace(/\\s+/g, '')) >= 0) {
         return {allowed:false, field:fieldName || '', category:'explicit', match:this.blockedPhrases_[i]};
       }
     }
@@ -83,7 +84,7 @@ const ContentModeration = {
     const padded = ' ' + normalized.replace(/[^a-z0-9]+/g, ' ') + ' ';
     for (let i=0; i<this.blockedWords_.length; i++) {
       const word = this.normalize_(this.blockedWords_[i]);
-      if (padded.indexOf(' ' + word + ' ') >= 0) {
+      if (padded.indexOf(' ' + word + ' ') >= 0 || compact.indexOf(word) >= 0 && word.length >= 4) {
         const category = ['porn','porno','pornography','xxx','nudes','nude','naked',
           'sexcam','sexchat','blowjob','handjob','deepthroat','masturbate',
           'masturbation','orgasm','vibrator','dildo','hooker','prostitute',
