@@ -62,6 +62,19 @@ The compiled DFY-GOOGLE-SCRIPT.gs contains the same moderation logic and self-te
 
 All three require an authenticated Admin role.
 
+## 6B. Frontend manual payment and admin verification
+
+The included React frontend in this repository uses the manual EFT API directly:
+
+- Creating a task routes the customer to `/tasks/payment?taskId=...`.
+- The payment page displays the configured Capitec business details and the exact task payment reference.
+- The customer can submit the bank reference and payment date; the actual PoP can be sent to WhatsApp `0795258611`.
+- The task remains private while `PendingPayment` or `AwaitingVerification`.
+- The Admin Payments page reads `GET /admin/payments/pending` and provides `Verify & Post` / `Reject` actions.
+- Verification changes the task to `Posted` / `EscrowHeld`; rejection leaves it private.
+
+No Ozow redirect or callback is used for task pay-in.
+
 ## 7. Payment expiry
 
 An unpaid or unverified task expires after 24 hours through `hourlyMaintenance()`. It is marked `Expired` rather than deleted, so the history remains available while it is removed from the active marketplace.
@@ -78,7 +91,7 @@ The frontend adapter sends every request to Apps Script as a POST envelope conta
 
 Google Apps Script ContentService is not a normal configurable API gateway. Google documents ContentService as a service for serving text/JSON from web apps, and Apps Script does not provide the same normal CORS/header controls as a conventional backend. Cross-origin browser calls must therefore be tested against the exact deployed Web App URL. If the React frontend is hosted on a separate origin and the browser blocks the response, the production architecture must either serve the frontend from the Apps Script web app/origin or introduce a same-origin proxy.
 
-Do not mark the migration production-ready until a real browser test proves login, task creation, manual payment submission, admin payment verification, task claiming, completion, confirmation and admin flows from the deployed frontend.
+Do not mark the migration production-ready until a real browser test proves login, task creation, manual EFT details, payment submission, admin payment verification, task claiming, completion, confirmation and admin flows from the deployed frontend. The repository code is prepared for this test, but a deployed Google Apps Script runtime must still be exercised.
 
 ## Payment semantics
 
