@@ -81,21 +81,6 @@ function validateStepTwo(values: { dateNeeded: string; budget: string }) {
   return { valid: Object.keys(errors).length === 0, errors }
 }
 
-function isSafePaymentUrl(url: string) {
-  try {
-    const parsed = new URL(url)
-    // Ozow may use stagingapi.ozow.com or api.ozow.com hosted payment URLs.
-    // Do not allow arbitrary redirects returned by an unexpected backend response.
-    return parsed.protocol === 'https:' && (
-      parsed.hostname === 'stagingapi.ozow.com' ||
-      parsed.hostname === 'api.ozow.com' ||
-      parsed.hostname.endsWith('.ozow.com')
-    )
-  } catch {
-    return false
-  }
-}
-
 export default function PostErrand() {
   const { user, isAuthenticated, canPostErrands } = useAuth()
   const navigate = useNavigate()
@@ -215,7 +200,7 @@ export default function PostErrand() {
             <div className="step-nav"><button type="button" className="btn btn-primary" onClick={() => isStep1Valid() && setStep(2)} disabled={!isStep1Valid()}>Next <i className="fas fa-arrow-right" /></button></div>
           </div>}
           {step === 2 && <div className="form-section"><h3><i className="fas fa-calendar-alt" /> When & How Much?</h3><div className="form-row-2"><div className="form-group"><label className="form-label">Deadline *</label><div className="input-with-icon"><i className="fas fa-calendar" /><input type="datetime-local" className="form-input" value={form.dateNeeded} onChange={set('dateNeeded')} required /></div>{fieldErrors.dateNeeded && <small className="text-error">{fieldErrors.dateNeeded}</small>}</div><div className="form-group"><label className="form-label">Your Budget (R) *</label><div className="budget-input-wrap"><span className="currency-prefix">R</span><input type="number" className="form-input budget-input" placeholder="100.00" min={minAmount} max={maxAmount} step={0.01} value={form.budget} onChange={set('budget')} required /></div><small className="text-muted text-xs">R{minAmount} minimum · R{maxAmount} maximum</small>{fieldErrors.budget && <small className="text-error">{fieldErrors.budget}</small>}{budget >= 50 && <div className="commission-breakdown"><div className="breakdown-row total"><span>Task Budget:</span><span>R{budget.toFixed(2)}</span></div><small className="text-muted">Final platform fee and runner payout are calculated by DFY and confirmed by the backend.</small></div>}</div></div><div className="step-nav"><button type="button" className="btn btn-secondary" onClick={() => setStep(1)}><i className="fas fa-arrow-left" /> Previous</button><button type="button" className="btn btn-primary" onClick={() => isStep2Valid() && setStep(3)} disabled={!isStep2Valid()}>Next <i className="fas fa-arrow-right" /></button></div></div>}
-          {step === 3 && <div className="form-section"><div className="form-group"><label className="form-label">Anything else? (Optional)</label><textarea className="form-textarea" rows={3} placeholder="Special requirements, preferences..." value={form.notes} onChange={set('notes')} /></div><label className="terms-check"><input type="checkbox" checked={form.termsAccepted} onChange={set('termsAccepted')} /><span>I agree to the <a href="/terms" target="_blank">Terms & Conditions</a></span></label><div className="payment-info-card"><div className="payment-info-header"><i className="fas fa-shield-alt" /><h4>Secure Ozow Payment</h4></div><div className="payment-features"><span><i className="fas fa-lock" /> Bank-level security</span><span><i className="fas fa-bolt" /> Secure hosted checkout</span><span><i className="fas fa-shield-alt" /> Payment verified by DFY</span></div><p className="text-muted text-xs text-center mt-2">You will be redirected to Ozow to complete your payment. Your task only becomes live after DFY verifies the payment.</p></div><div className="step-nav"><button type="button" className="btn btn-secondary" onClick={() => setStep(2)}><i className="fas fa-arrow-left" /> Previous</button><button type="submit" className="btn btn-primary btn-lg" disabled={submitting || !form.termsAccepted}>{submitting ? <><span className="spinner spinner-sm" /> {isEdit ? 'Saving...' : 'Creating...'}</> : <><i className={`fas ${isEdit ? 'fa-save' : 'fa-rocket'}`} /> {isEdit ? 'Save Changes' : 'Continue to Ozow'}</>}</button></div></div>}
+          {step === 3 && <div className="form-section"><div className="form-group"><label className="form-label">Anything else? (Optional)</label><textarea className="form-textarea" rows={3} placeholder="Special requirements, preferences..." value={form.notes} onChange={set('notes')} /></div><label className="terms-check"><input type="checkbox" checked={form.termsAccepted} onChange={set('termsAccepted')} /><span>I agree to the <a href="/terms" target="_blank">Terms & Conditions</a></span></label><div className="payment-info-card"><div className="payment-info-header"><i className="fas fa-university" /><h4>Manual EFT payment</h4></div><div className="payment-features"><span><i className="fas fa-building-columns" /> Capitec Business</span><span><i className="fas fa-shield-halved" /> Admin verified</span><span><i className="fas fa-clock" /> 24-hour payment window</span></div><p className="text-muted text-xs text-center mt-2">After creating the task, you will receive the bank details. Your task remains private until an administrator confirms the EFT.</p></div><div className="step-nav"><button type="button" className="btn btn-secondary" onClick={() => setStep(2)}><i className="fas fa-arrow-left" /> Previous</button><button type="submit" className="btn btn-primary btn-lg" disabled={submitting || !form.termsAccepted}>{submitting ? <><span className="spinner spinner-sm" /> {isEdit ? 'Saving...' : 'Creating...'}</> : <><i className={`fas ${isEdit ? 'fa-save' : 'fa-file-invoice-dollar'}`} /> {isEdit ? 'Save Changes' : 'Create Task & Pay by EFT'}</>}</button></div></div>}
         </form>
       </section>
     </div>
