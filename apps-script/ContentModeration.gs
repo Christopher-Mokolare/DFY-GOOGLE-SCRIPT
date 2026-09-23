@@ -84,7 +84,9 @@ const ContentModeration = {
     const padded = ' ' + normalized.replace(/[^a-z0-9]+/g, ' ') + ' ';
     for (let i=0; i<this.blockedWords_.length; i++) {
       const word = this.normalize_(this.blockedWords_[i]);
-      if (padded.indexOf(' ' + word + ' ') >= 0 || compact.indexOf(word) >= 0 && word.length >= 4) {
+      const obfuscatedPattern = word.split('').join('[^a-z0-9]*');
+      const obfuscatedMatch = new RegExp('(^|[^a-z0-9])' + obfuscatedPattern + '($|[^a-z0-9])', 'i').test(normalized);
+      if (padded.indexOf(' ' + word + ' ') >= 0 || obfuscatedMatch) {
         const category = ['porn','porno','pornography','xxx','nudes','nude','naked',
           'sexcam','sexchat','blowjob','handjob','deepthroat','masturbate',
           'masturbation','orgasm','vibrator','dildo','hooker','prostitute',
