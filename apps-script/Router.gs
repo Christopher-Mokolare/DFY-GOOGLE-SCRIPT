@@ -1,11 +1,10 @@
 const Router = {
   handle:function(path,method,body,token,query){
     currentToken_=token||'';
-    const publicPaths=['/auth/login','/auth/register','/public/stats','/categories','/payments/ozow/notify'];
+    const publicPaths=['/auth/login','/auth/register','/public/stats','/categories'];
     let user=null;
     if(publicPaths.indexOf(path)<0) user=Auth.require(token);
 
-    if(path==='/payments/ozow/notify'&&method==='POST') return Payments.handleOzowNotification_(body);
     if(path==='/public/stats') return ok_({availableTasks:DB.where_('Tasks',t=>t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld').length,completedTasks:DB.where_('Tasks',t=>t.taskStatus==='RunnerPaid').length});
     if(path==='/auth/login'&&method==='POST') return Auth.login(body);
     if(path==='/auth/register'&&method==='POST') return (function(){const u=Auth.createUser_(body);return Auth.login({email:u.email,password:body.password});})();
@@ -26,9 +25,10 @@ const Router = {
     if(path==='/tasks/dashboard/stats'&&method==='GET') return Tasks.stats(user);
     if(path==='/tasks/payment-history'&&method==='GET') return Tasks.paymentHistory(user);
     if(path==='/tasks/cleanup'&&method==='POST') return Tasks.cleanup(user);
+    if(path==='/admin/payments/pending'&&method==='GET'){Auth.requireAdmin(token);return Payments.pendingManual_();}
     const taskMatch=path.match(/^\/tasks\/([^/]+)(?:\/(.*))?$/);
-    if(taskMatch){const id=taskMatch[1],action=taskMatch[2]||'';if(!action&&method==='GET')return Tasks.get(id,user);if(!action&&method==='PUT')return Tasks.update(id,body,user);if(action==='claim'&&method==='POST')return Tasks.claim(id,body,user);if(action==='complete'&&method==='POST')return Tasks.complete(id,user);if(action==='confirm'&&method==='POST')return Tasks.confirm(id,user);if(action==='cancel'&&method==='POST')return Tasks.cancel(id,body,user);if(action==='messages'&&method==='GET')return Messages.list(id,user);if(action==='messages'&&method==='POST')return Messages.send(id,body,user);if(action==='messages/read'&&method==='PUT')return Messages.read(id,user);if(action==='progress'&&method==='POST'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id));const p=DB.insert_('Progress',{id:DB.nextId_('Progress'),taskId:t.id,userId:user.id,message:body.progressNote||body.message||'',createdAt:Util.iso()});return ok_(p);}if(action==='payment-url'&&method==='GET'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id)||String(x.id)===String(id));if(!t)return fail_('Task not found');if(String(t.createdByUserId)!==String(user.id))return forbidden_();return Payments.createPaymentRequest_(t,user);}}
-    if(path==='/banking/accounts'&&method==='GET')return Banking.accounts(user);
+    if(taskMatch){const id=taskMatch[1],action=taskMatch[2]||'';if(!action&&method==='GET')return Tasks.get(id,user);if(!action&&method==='PUT')return Tasks.update(id,body,user);if(action==='claim'&&method==='POST')return Tasks.claim(id,body,user);if(action==='complete'&&method==='POST')return Tasks.complete(id,user);if(action==='confirm'&&method==='POST')return Tasks.confirm(id,user);if(action==='cancel'&&method==='POST')return Tasks.cancel(id,body,user);if(action==='messages'&&method==='GET')return Messages.list(id,user);if(action==='messages'&&method==='POST')return Messages.send(id,body,user);if(action==='messages/read'&&method==='PUT')return Messages.read(id,user);if(action==='progress'&&method==='POST'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id));const p=DB.insert_('Progress',{id:DB.nextId_('Progress'),taskId:t.id,userId:user.id,message:body.progressNote||body.message||'',createdAt:Util.iso()});return ok_(p);}if(action==='payment-url'&&method==='GET'){return Payments.manualDetails_(DB.rows_('Tasks').find(x=>String(x.taskId)===String(id)||String(x.id)===String(id)),user);}if(action==='payment-submit'&&method==='POST'){return Payments.submitManual_(id,body,user);}}
+    if(path==='/banking/accounts'&&method==='GET')return Banking.accounts(user);return Banking.accounts(user);
     if(path==='/banking/accounts'&&method==='POST')return Banking.add(body,user);
     const bv=path.match(/^\/banking\/bank-accounts\/(\d+)\/verify$/);if(bv&&method==='POST')return Banking.verify(Number(bv[1]),user);
     if(path==='/banking/banks'&&method==='GET')return Banking.banks();
@@ -64,6 +64,7 @@ const Router = {
     const am=path.match(/^\/admin\/tasks\/([^/]+)\/messages$/);if(am&&method==='GET'){Auth.requireAdmin(token);return ok_(DB.where_('Messages',m=>{const t=DB.findById_('Tasks',m.taskId);return t&&String(t.taskId)===am[1];}));}
     const ab=path.match(/^\/admin\/bank-accounts\/(\d+)\/verify$/);if(ab&&method==='PATCH'){Auth.requireAdmin(token);const ba=DB.findById_('BankAccounts',Number(ab[1]));if(!ba)return fail_('Bank account not found');DB.update_('BankAccounts',ba.id,{isVerified:true,verifiedAt:Util.iso()});Audit.log_(user.id,'AdminVerifyBankAccount','BankAccount',ba.id,'','verified=true');return ok_(true,'Bank account verified');}
     const av=path.match(/^\/admin\/tasks\/([^/]+)\/(verify|unverify|force-release-escrow)$/);if(av&&method==='PATCH'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(av[1]));if(!t)return fail_('Task not found');Auth.requireAdmin(token);if(av[2]==='force-release-escrow')return Payments.release_(t,true);DB.update_('Tasks',t.id,{paymentStatus:av[2]==='verify'?'EscrowHeld':'Pending',escrowStatus:av[2]==='verify'?'held':'pending',taskStatus:av[2]==='verify'?'Posted':'PendingPayment',updatedAt:Util.iso()});return ok_(true,'Payment status updated');}
+    const apv=path.match(/^\/admin\/payments\/(\d+)\/(verify|reject)$/);if(apv&&method==='POST'){const admin=Auth.requireAdmin(token);return apv[2]==='verify'?Payments.verifyManual_(Number(apv[1]),body,admin):Payments.rejectManual_(Number(apv[1]),body,admin);}
     const ar=path.match(/^\/admin\/users\/(\d+)\/(status|role)$/);if(ar&&method==='PATCH'){Auth.requireAdmin(token);const uid=Number(ar[1]);DB.update_('Users',uid,ar[2]==='status'?{isVerified:body.isVerified}:{userType:body.role});Audit.log_(user.id,'AdminUserUpdate','User',uid,'',JSON.stringify(body));return ok_(true,'User updated');}
     const del=path.match(/^\/admin\/(tasks|users)\/(.+)$/);if(del&&method==='DELETE'){Auth.requireAdmin(token);const id=del[2];if(del[1]==='tasks'){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(id));if(t)DB.update_('Tasks',t.id,{isDeleted:true,deletedAt:Util.iso(),taskStatus:'Cancelled'});}else DB.delete_('Users',Number(id));return ok_(true,'Deleted');}
 
