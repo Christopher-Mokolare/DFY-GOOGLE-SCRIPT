@@ -56,11 +56,11 @@ const ContentModeration = {
          .replace(/[$5]/g, 's')
          .replace(/[7]/g, 't');
 
-    // Remove zero-width characters and collapse separators between letters.
-    s = s.replace(/[\\u200b-\\u200f\\u202a-\\u202e\\ufeff]/g, '');
-    s = s.replace(/([a-z])[^a-z0-9\\s]+(?=[a-z])/g, '$1');
-    s = s.replace(/(.)\\1{3,}/g, '$1$1$1');
-    s = s.replace(/\\s+/g, ' ').trim();
+    // Remove zero-width characters and collapse punctuation between letters.
+    s = s.replace(/[\u200b-\u200f\u202a-\u202e\ufeff]/g, '');
+    s = s.replace(/([a-z])[^a-z0-9\s]+(?=[a-z])/g, '$1');
+    s = s.replace(/(.)\1{3,}/g, '$1$1$1');
+    s = s.replace(/\s+/g, ' ').trim();
 
     return s;
   },
