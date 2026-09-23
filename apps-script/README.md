@@ -30,3 +30,18 @@ The frontend can call the API using POST JSON envelopes:
 { "path": "/auth/login", "method": "POST", "body": {...}, "token": "..." }
 
 GET requests may use ?path=/categories&token=...
+
+
+## Ozow pay-in configuration
+
+Set these Google Apps Script **Script Properties** (never commit their values):
+- `OZOW_API_KEY`
+- `OZOW_SITE_CODE`
+- `OZOW_PRIVATE_KEY`
+- `OZOW_IS_TEST` = `true` for test/staging or `false` for live
+- `OZOW_API_URL` = `https://stagingapi.ozow.com/postpaymentrequest` for staging or `https://api.ozow.com/postpaymentrequest` for production
+- `DFY_FRONTEND_URL`
+- Optional: `DFY_PAYMENT_SUCCESS_URL`, `DFY_PAYMENT_CANCEL_URL`, `DFY_PAYMENT_ERROR_URL`
+
+Flow: `Create task -> PendingPayment -> Ozow checkout -> verified Complete notification -> Posted + EscrowHeld`.
+A redirect back to the frontend is not treated as proof of payment; the verified Ozow notification is authoritative.
