@@ -46,6 +46,14 @@ The account number is also supplied as a safe default in code, but Script Proper
 
 A customer cannot publish a task simply by saying that they paid.
 
+## 6A. Task content moderation
+
+Task names and descriptions are moderated server-side in ContentModeration.gs before task creation and again when a PendingPayment task is edited. The moderation check covers clearly identified profanity, sexually explicit content, sexual solicitation and hate/slur terms, including common character substitutions and separator-based obfuscation.
+
+If moderation blocks the content, the API returns a validation error and does not create or update the task. This protects the backend even when a client bypasses frontend validation.
+
+The compiled DFY-GOOGLE-SCRIPT.gs contains the same moderation logic and self-test coverage.
+
 ## 6. Admin endpoints
 
 - `GET /admin/payments/pending` — manual payments awaiting verification.
