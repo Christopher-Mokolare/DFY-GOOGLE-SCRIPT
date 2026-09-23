@@ -57,13 +57,13 @@ const Payments = {
     try{Object.assign(meta,payment.metadata?JSON.parse(payment.metadata):{});}catch(_){}
     Object.assign(meta,{provider:'MANUAL',status:'AWAITING_VERIFICATION',senderReference:senderReference,paidAt:paidAt,proofOfPayment:proof,submittedBy:user.id,submittedAt:now});
     DB.update_('Payments',payment.id,{amount:amount,status:'AWAITING_VERIFICATION',updatedAt:now,metadata:JSON.stringify(meta)});
-    DB.update_('Tasks',task.id,{paymentStatus:'AwaitingVerification',taskStatus:'AwaitingVerification',escrowStatus:'pending',updatedAt:now});
+    DB.update_('Tasks',task.id,{paymentStatus:'AwaitingVerification',taskStatus:'PendingPayment',escrowStatus:'pending',updatedAt:now});
     Audit.log_(user.id,'SubmitManualPayment','Payment',payment.id,'',JSON.stringify({taskId:task.id,amount:amount,senderReference:senderReference,paidAt:paidAt,hasProof:!!proof}));
     Notify.allAdmins('payment_verification_required','Payment Awaiting Verification','A customer submitted payment for task '+task.taskId,task.id);
     return ok_({taskId:task.taskId,paymentId:payment.id,paymentStatus:'AwaitingVerification',taskStatus:'AwaitingVerification'},'Payment submitted for verification');
   },
   pendingManual_: function(){
-    const rows=DB.where_('Payments',function(p){return p.type==='TASK_PAYMENT'&&p.status==='AWAITING_VERIFICATION';});
+    const rows=DB.where_('Payments',function(p){return p.type==='TASK_PAYMENT'&&['PENDING','AWAITING_VERIFICATION'].indexOf(String(p.status))>=0;});
     return ok_(rows.map(function(p){
       const t=DB.findById_('Tasks',p.taskId),u=t?DB.findById_('Users',t.createdByUserId):null,meta={};
       try{Object.assign(meta,p.metadata?JSON.parse(p.metadata):{});}catch(_){}
@@ -79,7 +79,7 @@ const Payments = {
       if(!payment||payment.type!=='TASK_PAYMENT')return fail_('Payment not found');
       const task=DB.findById_('Tasks',payment.taskId);if(!task)return fail_('Task not found');
       if(String(payment.status)==='VERIFIED'&&task.taskStatus==='Posted')return ok_({taskId:task.taskId,paymentStatus:'EscrowHeld',taskStatus:'Posted'},'Payment already verified');
-      if(String(payment.status)!=='AWAITING_VERIFICATION')return fail_('Payment is not awaiting verification');
+      if(['PENDING','AWAITING_VERIFICATION'].indexOf(String(payment.status))<0)return fail_('Payment is not awaiting verification');
       const amount=Number(body.amount!==undefined?body.amount:payment.amount);
       if(Math.abs(amount-Number(task.budget||0))>0.009)return fail_('Verified amount must match the task budget');
       const now=Util.iso();
