@@ -447,6 +447,78 @@ const Payments = {
 };
 
 // ============================================================
+// ContentModeration.gs
+// Server-side moderation for task names and descriptions.
+// ============================================================
+
+const ContentModeration = {
+  VERSION: '1.0',
+  blockedWords_: [
+    'fuck','fucker','fucking','motherfucker','shit','bullshit','bitch','bitches',
+    'asshole','arsehole','dickhead','prick','cunt','bastard','wanker','twat',
+    'piss','pissed','damn','douchebag','dumbass','jackass','sonofabitch',
+    'porn','porno','pornography','xxx','nudes','nude','naked','sexcam','sexchat',
+    'blowjob','handjob','deepthroat','masturbate','masturbation','orgasm',
+    'vibrator','dildo','hooker','prostitute','prostitution','escort',
+    'onlyfans','sexwork','sexworker','sexting','sext','horny','cum','ejaculate',
+    'anal','vagina','penis','genitals','boobs','tits','titjob','pussy',
+    'nigger','nigga','faggot','fag','dyke','kike','spic','chink','gook',
+    'wetback','retard','retarded'
+  ],
+  blockedPhrases_: [
+    'send nudes','send me nudes','nudes please','sex for money',
+    'sex in exchange','sexual services','sexual service','explicit photos',
+    'explicit pictures','porn videos','porn video','porn pictures','porn photos'
+  ],
+  normalize_: function(value) {
+    let s=String(value==null?'':value).toLowerCase();
+    s=s.replace(/[4@]/g,'a').replace(/[3]/g,'e').replace(/[1!|]/g,'i')
+      .replace(/[0]/g,'o').replace(/[$5]/g,'s').replace(/[7]/g,'t');
+    s=s.replace(/[\\u200b-\\u200f\\u202a-\\u202e\\ufeff]/g,'');
+    s=s.replace(/([a-z])[^a-z0-9]+(?=[a-z])/g,'$1');
+    s=s.replace(/(.)\\1{3,}/g,'$1$1$1');
+    return s.replace(/\\s+/g,' ').trim();
+  },
+  check_: function(value,fieldName) {
+    const original=String(value==null?'':value).trim();
+    if(!original)return {allowed:true,field:fieldName||'',category:'',match:''};
+    const normalized=this.normalize_(original);
+    for(let i=0;i<this.blockedPhrases_.length;i++){
+      const phrase=this.normalize_(this.blockedPhrases_[i]);
+      if(normalized.indexOf(phrase)>=0)return {allowed:false,field:fieldName||'',category:'explicit',match:this.blockedPhrases_[i]};
+    }
+    const padded=' '+normalized.replace(/[^a-z0-9]+/g,' ')+' ';
+    for(let i=0;i<this.blockedWords_.length;i++){
+      const word=this.normalize_(this.blockedWords_[i]);
+      if(padded.indexOf(' '+word+' ')>=0){
+        const category=['porn','porno','pornography','xxx','nudes','nude','naked','sexcam','sexchat',
+          'blowjob','handjob','deepthroat','masturbate','masturbation','orgasm','vibrator','dildo',
+          'hooker','prostitute','prostitution','escort','onlyfans','sexwork','sexworker','sexting',
+          'sext','horny','cum','ejaculate','anal','vagina','penis','genitals','boobs','tits','titjob',
+          'pussy'].indexOf(word)>=0?'explicit':
+          ['nigger','nigga','faggot','fag','dyke','kike','spic','chink','gook','wetback','retard',
+           'retarded'].indexOf(word)>=0?'hate_or_slur':'profanity';
+        return {allowed:false,field:fieldName||'',category:category,match:this.blockedWords_[i]};
+      }
+    }
+    return {allowed:true,field:fieldName||'',category:'',match:''};
+  },
+  validateTask_: function(body) {
+    const checks=[
+      this.check_(body&&(body.taskName!==undefined?body.taskName:body.title),'taskName'),
+      this.check_(body&&(body.taskDescription!==undefined?body.taskDescription:body.description),'taskDescription')
+    ];
+    const blocked=checks.find(function(x){return !x.allowed;});
+    if(!blocked)return {allowed:true};
+    return {allowed:false,field:blocked.field,category:blocked.category,match:blocked.match,
+      message:'Your task contains language that is not allowed. Please edit the task name or description and try again.'};
+  },
+  validateTaskValues_: function(taskName,taskDescription) {
+    return this.validateTask_({taskName:taskName,taskDescription:taskDescription});
+  }
+};
+
+// ============================================================
 // Tasks.gs
 // ============================================================
 
@@ -454,6 +526,8 @@ const Tasks = {
   create: function(body,user){
     if(!Auth.profileCompletion_(user).complete) return fail_('Please complete your profile before creating tasks');
     if(!Auth.canCreate_(user)) return fail_('Only Creators and Both accounts can post tasks.');
+    const moderation=ContentModeration.validateTask_(body);
+    if(!moderation.allowed) return fail_(moderation.message,{field:moderation.field,category:moderation.category});
     const budget=Util.money(body.budget);
     if(budget<50) return fail_('validation failed: minimum budget is R50');
     const commission=Util.commission(budget);
@@ -520,7 +594,12 @@ const Tasks = {
   update: function(taskId,body,user){
     const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)&&String(x.createdByUserId)===String(user.id));
     if(!t) return fail_('Task not found'); if(t.taskStatus!=='PendingPayment') return fail_('Only pending payment tasks can be edited');
+    const nextTaskName=body.taskName!==undefined?String(body.taskName).trim():t.taskName;
+    const nextTaskDescription=body.taskDescription!==undefined?String(body.taskDescription).trim():t.taskDescription;
+    const moderation=ContentModeration.validateTaskValues_(nextTaskName,nextTaskDescription);
+    if(!moderation.allowed) return fail_(moderation.message,{field:moderation.field,category:moderation.category});
     const patch={updatedAt:Util.iso()};
+    if(body.taskName!==undefined) patch.taskName=nextTaskName;
     ['taskDescription','category','area','priority','notes','dateNeeded'].forEach(k=>{if(body[k]!==undefined)patch[k]=body[k]});
     if(body.budget!==undefined&&Number(body.budget)>=50){patch.budget=Util.money(body.budget);patch.commissionAmount=Util.commission(patch.budget);patch.payoutAmount=Util.money(patch.budget-patch.commissionAmount);}
     DB.update_('Tasks',t.id,patch); return ok_({taskId:t.taskId},'Task updated successfully');
@@ -571,6 +650,8 @@ function selfTest() {
     creator=Auth.createUser_({email:'selftest.creator.'+suffix+'@doforyou.local',password:'SelfTest!123',firstName:'Self',lastName:'Creator',userType:'Creator',roles:'User',phoneNumber:'0000000000',idNumber:'9001015009087',address:'Test Address',dateOfBirth:'1990-01-01',isVerified:true});
     admin=Auth.createUser_({email:'selftest.admin.'+suffix+'@doforyou.local',password:'SelfTest!123',firstName:'Self',lastName:'Admin',userType:'Admin',roles:'User,Admin',isVerified:true});
     const creatorUser=DB.findById_('Users',creator.id),adminUser=DB.findById_('Users',admin.id);
+    const blocked=Tasks.create({taskName:'Send nudes please',taskDescription:'Manual payment test',category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'},creatorUser);
+    if(blocked.success)throw new Error('Content moderation failed to block explicit task content');
     task=Tasks.create({taskName:'Self Test Task',taskDescription:'Manual payment test',category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'},creatorUser);
     if(!task.success)throw new Error('Task creation failed: '+task.message);
     let raw=DB.rows_('Tasks').find(t=>String(t.taskId)===String(task.data.taskId));
