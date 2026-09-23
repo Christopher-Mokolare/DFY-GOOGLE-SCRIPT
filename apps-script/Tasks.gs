@@ -21,7 +21,7 @@ const Tasks = {
     Audit.log_(user.id,'CreateTask','Task',task.id,'',JSON.stringify(task));
     return ok_(Object.assign({payment:details.data,paymentUrl:null},Util.taskDto(task)),'Task created. Complete the manual EFT payment and submit your Proof of Payment.');
   },
-  get: function(taskId,user){ const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)||String(x.id)===String(taskId)); return t?ok_(Util.taskDto(t),'Task retrieved successfully'):fail_('Task not found'); },
+  get: function(taskId,user){ const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)||String(x.id)===String(taskId)); if(!t)return fail_('Task not found'); const admin=String(user.roles||'').split(',').indexOf('Admin')>=0; const owner=String(t.createdByUserId)===String(user.id); const runner=String(t.acceptedByUserId)===String(user.id); if(!admin&&!owner&&!runner&&t.taskStatus!=='Posted')return fail_('Task not found'); return ok_(Util.taskDto(t),'Task retrieved successfully'); },
   available: function(query,user){
     const page=Math.max(1,Number(query.page||1)), size=Math.min(100,Math.max(1,Number(query.pageSize||10))), filters=query||{};
     const all=DB.where_('Tasks',t=>String(t.isDeleted)!=='true'&&t.taskStatus==='Posted'&&t.paymentStatus==='EscrowHeld'&&String(t.createdByUserId)!==String(user.id)&&(!filters.category||t.category===filters.category)&&(!filters.area||String(t.area).toLowerCase().indexOf(String(filters.area).toLowerCase())>=0));
