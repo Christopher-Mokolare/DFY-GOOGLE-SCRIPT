@@ -654,6 +654,10 @@ function selfTest() {
     const creatorUser=DB.findById_('Users',creator.id),adminUser=DB.findById_('Users',admin.id);
     const blocked=Tasks.create({taskName:'Send nudes please',taskDescription:'Manual payment test',category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'},creatorUser);
     if(blocked.success)throw new Error('Content moderation failed to block explicit task content');
+    const obfuscated=Tasks.create({taskName:'f.u.c.k this',taskDescription:'Manual payment test',category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'},creatorUser);
+    if(obfuscated.success)throw new Error('Content moderation failed to block obfuscated profanity');
+    const blockedDescription=Tasks.create({taskName:'Clean task',taskDescription:'This is a porn request for explicit content',category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'},creatorUser);
+    if(blockedDescription.success)throw new Error('Content moderation failed to block explicit description');
     task=Tasks.create({taskName:'Self Test Task',taskDescription:'Manual payment test',category:'Other',area:'Test',dateNeeded:Util.iso(),budget:400,notes:'',priority:'Normal'},creatorUser);
     if(!task.success)throw new Error('Task creation failed: '+task.message);
     let raw=DB.rows_('Tasks').find(t=>String(t.taskId)===String(task.data.taskId));
