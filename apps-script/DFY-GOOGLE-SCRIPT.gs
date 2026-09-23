@@ -362,6 +362,7 @@ const Payments = {
     if(!task)return fail_('Task not found');
     if(String(task.createdByUserId)!==String(user.id))return forbidden_();
     if(['PendingPayment','AwaitingVerification'].indexOf(String(task.taskStatus))<0)return fail_('This task is no longer awaiting payment');
+    if(new Date(task.createdAt).getTime() < Date.now()-24*3600000){ this.expirePending_(); return fail_('This task payment window has expired'); }
     const amount=Util.money(body.paidAmount!==undefined?body.paidAmount:body.amount);
     if(amount<=0)return fail_('Paid amount is required');
     if(Math.abs(amount-Number(task.budget||0))>0.009)return fail_('Paid amount must match the task budget');
