@@ -1,9 +1,7 @@
 // Environment configuration.
-// Set VITE_GOOGLE_SCRIPT_URL to the deployed Apps Script Web App URL.
-// The fallback intentionally remains the existing API during migration until
-// a deployment URL is supplied.
+// The Google Apps Script Web App is the only intended backend for this repository.
 const env = {
-  apiUrl: import.meta.env.VITE_GOOGLE_SCRIPT_URL || import.meta.env.VITE_API_URL || 'https://dfy-be-staging.onrender.com/api/v1',
+  apiUrl: import.meta.env.VITE_GOOGLE_SCRIPT_URL || import.meta.env.VITE_API_URL || '',
   signalRUrl: import.meta.env.VITE_SIGNALR_URL || '',
   appName: import.meta.env.VITE_APP_NAME || 'DoForYou',
   whatsappNumber: import.meta.env.VITE_WHATSAPP || '27795258611',
