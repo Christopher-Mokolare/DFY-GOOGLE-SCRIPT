@@ -23,9 +23,6 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Restore the session synchronously from storage. This is important for routing:
-  // Layout must know that the user is authenticated on its first render, otherwise
-  // a protected route can briefly render the public Header before the sidebar mounts.
   const [session] = useState(() => {
     const storedToken = localStorage.getItem('token')
     const storedUser = localStorage.getItem('currentUser')
@@ -44,8 +41,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loginTransitioning, setLoginTransitioning] = useState(false)
 
   useEffect(() => {
-    // Refresh the authoritative profile in the background without blocking the
-    // authenticated workspace from rendering.
     if (!session.token || !session.user?.id) return
     authApi.getProfile()
       .then(r => {
@@ -69,7 +64,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       localStorage.setItem('token', data.token)
       setToken(data.token)
-    // Fetch full profile so idNumber/address are available for isProfileComplete
       let fullUser = data.user
       try {
         const profileRes = await authApi.getProfile()
@@ -78,9 +72,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch { /* fall back to login user */ }
       localStorage.setItem('currentUser', JSON.stringify(fullUser))
       setUser(fullUser)
-      // Login awaits this function and navigates immediately after it resolves.
-      // Defer clearing the flag by one macrotask so Layout cannot render Header
-      // between the auth state update and the destination navigation.
       setTimeout(() => setLoginTransitioning(false), 0)
       return fullUser
     } catch (error) {
@@ -109,13 +100,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch(() => { /* retain current state on transient refresh failure */ })
   }, [])
 
+  // Apps Script tokens are opaque (uuid-uuid), not JWTs.
+  // The backend validates on every request; here we just check presence.
   const isAuthenticated = useCallback(() => {
     if (!token) return false
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
-      return payload.exp > Date.now() / 1000
-    } catch { return false }
-  }, [token])
+    return !!user
+  }, [token, user])
 
   const isAdmin = useCallback(() => {
     if (!user) return false
@@ -124,8 +114,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return user.userType === 'Admin'
   }, [user])
 
-  // These values are presentation mirrors of backend policy. The FE never
-  // independently validates profile completeness or role capabilities.
   const isProfileComplete = useCallback(() => user?.profileCompleted === true, [user])
 
   const isProfileIncomplete = useCallback(() => !isProfileComplete(), [isProfileComplete])
