@@ -38,7 +38,7 @@ The account number is also supplied as a safe default in code, but Script Proper
 3. The API returns the bank details, amount and task payment reference.
 4. Customer makes the EFT manually.
 5. Customer submits the payment amount, bank reference, payment date and optional Proof of Payment through `POST /tasks/{taskId}/payment-submit`.
-6. The payment becomes `AWAITING_VERIFICATION`; the task becomes `AwaitingVerification` and remains invisible to helpers.
+6. The payment becomes `AWAITING_VERIFICATION`; the task remains `PendingPayment` and remains invisible to helpers.
 7. An administrator checks the actual Capitec business account.
 8. Administrator calls `POST /admin/payments/{paymentId}/verify`.
 9. Only successful admin verification changes the task to `Posted` + `EscrowHeld`.
