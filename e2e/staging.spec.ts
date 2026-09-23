@@ -26,15 +26,6 @@ function makePhone() {
   return '082' + String(Date.now() % 10000000).padStart(7, '0')
 }
 
-test.beforeAll(async () => {
-  const ctx = await request.newContext()
-  await Promise.allSettled([
-    ctx.get('https://dfy-be-staging.onrender.com/health'),
-    ctx.get('https://dfy-fe-staging.onrender.com'),
-  ])
-  await ctx.dispose()
-})
-
 async function waitForAppReady(page: Page) {
   await page.waitForFunction(
     () => document.title !== 'Render - Application loading',
