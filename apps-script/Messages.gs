@@ -1,0 +1,6 @@
+const Messages = {
+  list:function(taskId,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId)||String(x.id)===String(taskId));if(!t)return fail_('Task not found');if(String(t.createdByUserId)!==String(user.id)&&String(t.acceptedByUserId)!==String(user.id))return fail_('Not authorized');return ok_(DB.where_('Messages',m=>String(m.taskId)===String(t.id)).sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt)));},
+  send:function(taskId,body,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId));if(!t)return fail_('Task not found');if(String(t.createdByUserId)!==String(user.id)&&String(t.acceptedByUserId)!==String(user.id))return fail_('Not authorized');const m=DB.insert_('Messages',{id:DB.nextId_('Messages'),taskId:t.id,senderId:user.id,content:String(body.content||'').trim(),isRead:false,createdAt:Util.iso()});return ok_(m,'Message sent');},
+  read:function(taskId,user){const t=DB.rows_('Tasks').find(x=>String(x.taskId)===String(taskId));if(t)DB.where_('Messages',m=>String(m.taskId)===String(t.id)&&String(m.senderId)!==String(user.id)&&String(m.isRead)!=='true').forEach(m=>DB.update_('Messages',m.id,{isRead:true}));return ok_(true);},
+  system:function(taskId,userId,content){DB.insert_('Messages',{id:DB.nextId_('Messages'),taskId:taskId,senderId:userId,content:content,isRead:false,createdAt:Util.iso()});}
+};
