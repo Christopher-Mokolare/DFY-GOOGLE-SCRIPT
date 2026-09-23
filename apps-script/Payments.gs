@@ -4,7 +4,7 @@ const Payments = {
     return {
       bankName:String(p.getProperty('DFY_BANK_NAME')||'Capitec – Business').trim(),
       accountName:String(p.getProperty('DFY_BANK_ACCOUNT_NAME')||'DoForYou Freelance').trim(),
-      accountNumber:String(p.getProperty('DFY_BANK_ACCOUNT_NUMBER')||'').trim(),
+      accountNumber:String(p.getProperty('DFY_BANK_ACCOUNT_NUMBER')||'2495858216').trim(),
       branchCode:String(p.getProperty('DFY_BANK_BRANCH_CODE')||'').trim(),
       accountType:String(p.getProperty('DFY_BANK_ACCOUNT_TYPE')||'Business').trim(),
       instructions:String(p.getProperty('DFY_PAYMENT_INSTRUCTIONS')||'Make an EFT and use your full name as the bank reference. Send your Proof of Payment to WhatsApp 0795258611.').trim(),
